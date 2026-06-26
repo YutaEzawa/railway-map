@@ -1,32 +1,78 @@
-# React + TypeScript + Vite
+# railway-map
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+地図上に鉄道路線を表示する Web アプリ。趣味で開発しているプロジェクトです。
 
-Currently, two official plugins are available:
+## 概要
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+地図を表示し、その上に鉄道路線を描画する Web サイト。データは初期は GeoJSON で
+ローカル保持し、将来的なデータ量増加に備えてベクトルタイル（PMTiles）へ
+シームレスに移行できる構造を目指す。
 
-## React Compiler
+## 設計方針
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- コスト安全性（最重要）: クラウド利用時の高額請求（従量課金の爆発）を構造的に回避する
+- インフラの可搬性: Cloudflare と自宅 Docker 環境のどちらでも動かせる構成にする
+- 自動デプロイ: GitHub への push をトリガーとした CI/CD を前提とする
 
-## Expanding the Oxlint configuration
+### コスト安全性の考え方
+- ホスティングは Cloudflare Pages（転送量無料枠が実質無制限）
+- サーバーレス層（Workers / D1）は無料プランに留める（超過時はエラー停止で課金なし）
+- 将来の PMTiles 配置先は Cloudflare R2（Egress 無料）
+- 背景地図は国土地理院タイルを利用し、従量課金型タイルサービスは原則使わない
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+## 技術スタック
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
+### フロントエンド
+- ビルド基盤: Vite + React + TypeScript
+- 地図ライブラリ: MapLibre GL JS（react-map-gl/maplibre）
+- 状態/キャッシュ管理: TanStack Query（将来のバックエンド連携を見据えて初期導入）
+- 背景地図: 国土地理院 標準地図タイル
+
+### データ戦略
+- 初期: 鉄道路線データを GeoJSON でフロントエンドの assets にローカル保持
+- 将来: PMTiles（ベクトルタイル）へ移行可能な構造を意識する
+  - データソース種別（geojson / pmtiles）を 1 箇所の設定で切り替えられる構造にする
+  - スタイル定義はソース種別から切り離して共通化する
+  - タイル化後も保持する属性名だけでスタイリング・インタラクションを組む
+
+### ホスティング
+- Cloudflare Pages（GitHub 連携で自動デプロイ）
+  - ビルドコマンド: npm run build
+  - 出力ディレクトリ: dist
+
+### バックエンド & ストレージ（将来の拡張ロードマップ・現時点では未実装）
+- サーバーレス: Cloudflare Workers
+- データベース: Cloudflare D1（SQLite ベース）
+- オブジェクトストレージ: Cloudflare R2（PMTiles 配置先）
+
+## セットアップ
+
+### 必要環境
+- Node.js v20 以上（LTS 推奨）
+
+### 開発
+
+```bash
+npm install
+npm run dev
 ```
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+### ビルド
+
+```bash
+npm run build
+```
+
+## デプロイ
+main ブランチへの push をトリガーに Cloudflare Pages で自動デプロイされる。
+
+## 出典・ライセンス表示
+- 背景地図: 国土地理院のタイルを使用。アプリ内に出典表示を行う。
+
+## ロードマップ
+- [x] 地図を 1 枚表示する（背景地図 + 出典表示）
+- [ ] 鉄道路線を GeoJSON で描画する
+- [ ] 路線クリックで情報を表示する
+- [ ] データ量増加に応じて PMTiles へ移行する
+- [ ] バックエンド（Workers / D1 / R2）の導入
+- [ ] 自宅 Docker 環境での動作対応
