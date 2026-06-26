@@ -51,7 +51,7 @@ export const ROUTE_SOURCE_KIND: RouteSourceKind = 'geojson'
 export const ROUTE_SOURCE: Record<RouteSourceKind, { description: string; url: string }> = {
   geojson: {
     description: 'GeoJSON を直接読み込む。小規模データ・開発初期向け。',
-    url: '', // 例: '/data/routes.geojson'
+    url: '/data/railways.geojson',
   },
   pmtiles: {
     description: 'PMTiles ベクトルタイル。大規模データ・本番向け。',
