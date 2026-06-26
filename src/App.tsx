@@ -1,10 +1,10 @@
-import MapView from './map/MapView'
+import RouteDiagram from './diagram/RouteDiagram'
 import './App.css'
 
 function App() {
   return (
     <div className="app">
-      <MapView />
+      <RouteDiagram />
     </div>
   )
 }
