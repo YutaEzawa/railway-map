@@ -5,7 +5,13 @@
       "Bash(git commit -m ' *)",
       "Bash(npm run *)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5174/)",
-      "Bash(open http://localhost:5174/)"
+      "Bash(open http://localhost:5174/)",
+      "WebSearch",
+      "WebFetch(domain:nlftp.mlit.go.jp)",
+      "Bash(curl -s http://localhost:5174/src/map/MapView.tsx -o /dev/null -w \"MapView.tsx: %{http_code}\\\\n\")",
+      "Bash(curl -s http://localhost:5174/)",
+      "Read(//private/tmp/**)",
+      "Bash(pkill -f \"vite\")"
     ]
   }
 }

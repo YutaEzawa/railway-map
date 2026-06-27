@@ -1,0 +1,59 @@
+/* 白地図 + 路線図ビュー。地図を画面全体に広げる。 */
+.map-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.map-view .maplibregl-map {
+  width: 100%;
+  height: 100%;
+}
+
+/* 主要駅ラベル。マーカーは点の左端基準なので、点を避けて右にずらす。
+   白フチ（text-shadow）を付けて背景の上でも読めるようにする。 */
+.map-view__label {
+  display: block;
+  margin-left: 7px;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: system-ui, sans-serif;
+  color: #1a1a1a;
+  pointer-events: none;
+  text-shadow:
+    1px 1px 2px #ffffff, -1px 1px 2px #ffffff,
+    1px -1px 2px #ffffff, -1px -1px 2px #ffffff;
+}
+
+/* 凡例（左上に重ねる）。路線が多いので 2 列に折り返す。 */
+.map-view__legend {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 4px 14px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  font-size: 12px;
+  font-family: system-ui, sans-serif;
+  color: #222222;
+}
+
+.map-view__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.map-view__swatch {
+  display: inline-block;
+  width: 16px;
+  height: 5px;
+  border-radius: 3px;
+  flex: none;
+}

@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# build-chiba-jr.cjs の入力（国土数値情報 N02・県境 GeoJSON）。生成物のみコミットする。
+.data
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
