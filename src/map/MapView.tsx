@@ -20,7 +20,13 @@ import {
 import './MapView.css'
 
 type Category = 'jr' | 'private'
-type LineProps = { line: string; category: Category; color: string }
+type LineProps = {
+  line: string
+  category: Category
+  color: string
+  trains: number
+  section?: string
+}
 type StationProps = {
   name: string
   lines: string[]
@@ -33,6 +39,16 @@ type StationsData = FeatureCollection<Point, StationProps>
 
 const RAILWAYS_URL = `${import.meta.env.BASE_URL}data/chiba-railways.geojson`
 const STATIONS_URL = `${import.meta.env.BASE_URL}data/chiba-stations.geojson`
+
+/** 本数（平日・片方向）の想定レンジ。線の太さ係数（少→細, 多→太）に対応づける。 */
+const TRAINS_MIN = 15
+const TRAINS_MAX = 230
+/** 本数に応じた太さ係数の式。 */
+const trainsFactor: ExpressionSpecification = [
+  'interpolate', ['linear'], ['get', 'trains'],
+  TRAINS_MIN, 0.55,
+  TRAINS_MAX, 1.7,
+]
 
 /** 駅名ラベルを表示し始めるズーム（カテゴリ × 主要/全駅ごと）。 */
 const LABEL_ZOOM = {
@@ -53,7 +69,14 @@ const lineCasingLayer: LineLayerSpecification = {
   layout: { 'line-join': 'round', 'line-cap': 'round' },
   paint: {
     'line-color': '#555555',
-    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 3.5, 12, 6, 16, 9],
+    // ズームを最上位の interpolate にし、各段の値に本数係数を掛ける
+    // （['zoom'] は他の式の中に入れられないため）。
+    'line-width': [
+      'interpolate', ['linear'], ['zoom'],
+      8, ['*', 3.5, trainsFactor],
+      12, ['*', 6, trainsFactor],
+      16, ['*', 9, trainsFactor],
+    ],
   },
 }
 
@@ -65,7 +88,12 @@ const lineLayer: LineLayerSpecification = {
   layout: { 'line-join': 'round', 'line-cap': 'round' },
   paint: {
     'line-color': ['get', 'color'],
-    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 1.8, 12, 4, 16, 7],
+    'line-width': [
+      'interpolate', ['linear'], ['zoom'],
+      8, ['*', 1.8, trainsFactor],
+      12, ['*', 4, trainsFactor],
+      16, ['*', 7, trainsFactor],
+    ],
   },
 }
 
@@ -111,13 +139,22 @@ export default function MapView() {
   // 現在ズーム（整数に丸める）。閾値判定は整数比較で十分なので再描画を抑えられる。
   const [zoom, setZoom] = useState(Math.floor(INITIAL_VIEW_STATE.zoom))
 
-  // 凡例（カテゴリ別の路線名＋色）。
+  // 凡例（カテゴリ別の路線名＋色）。区間分割した路線は親路線名で重複排除する。
   const { jrLines, privateLines } = useMemo(() => {
     const feats = railways.data?.features ?? []
-    return {
-      jrLines: feats.map((f) => f.properties).filter((p) => p.category === 'jr'),
-      privateLines: feats.map((f) => f.properties).filter((p) => p.category === 'private'),
+    const dedupe = (cat: Category) => {
+      const seen: Record<string, LineProps> = {}
+      const order: string[] = []
+      for (const f of feats) {
+        const p = f.properties
+        if (p.category === cat && !(p.line in seen)) {
+          seen[p.line] = p
+          order.push(p.line)
+        }
+      }
+      return order.map((l) => seen[l])
     }
+    return { jrLines: dedupe('jr'), privateLines: dedupe('private') }
   }, [railways.data])
 
   // 路線レイヤー用フィルタ（有効カテゴリのみ表示）。

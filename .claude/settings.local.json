@@ -11,7 +11,9 @@
       "Bash(curl -s http://localhost:5174/src/map/MapView.tsx -o /dev/null -w \"MapView.tsx: %{http_code}\\\\n\")",
       "Bash(curl -s http://localhost:5174/)",
       "Read(//private/tmp/**)",
-      "Bash(pkill -f \"vite\")"
+      "Bash(pkill -f \"vite\")",
+      "WebFetch(domain:ckan.odpt.org)",
+      "Bash(node -e \"console.log\\('node fetch available:', typeof fetch==='function'\\); console.log\\('node', process.version\\)\")"
     ]
   }
 }

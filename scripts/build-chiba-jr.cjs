@@ -19,6 +19,7 @@
  */
 const fs = require('fs')
 const path = require('path')
+const { readRows, toSections, toTrains } = require('./lines-csv.cjs')
 
 const N02_DIR = process.env.N02_DIR || path.resolve(__dirname, '../.data/N02/UTF-8')
 const JAPAN_GEOJSON =
@@ -27,6 +28,14 @@ const OUT_DIR = path.resolve(__dirname, '../public/data')
 
 const JR_OPERATOR = '東日本旅客鉄道'
 const CHIBA_ID = 12
+
+/** 本数が見つからない路線の既定値。 */
+const DEFAULT_TRAINS = 30
+
+// 区間定義・本数は data/chiba-lines.csv（手編集）から読み込む。
+const CSV_ROWS = readRows()
+const LINE_SECTIONS = toSections(CSV_ROWS) // { 路線名: [{label, stations}] }
+const TRAINS = toTrains(CSV_ROWS) // { 区間 or 路線: 本数 }
 
 /**
  * 私鉄の路線表示名の補正（事業者名|N02路線名 → 表示名）。
@@ -169,33 +178,67 @@ function main() {
   const rs = load(path.join(N02_DIR, 'N02-23_RailroadSection.geojson'))
   const st = load(path.join(N02_DIR, 'N02-23_Station.geojson'))
 
-  // --- 路線: 表示路線名ごとに Chiba 内のセグメントを MultiLineString にまとめる ---
-  const lines = {} // 表示名 -> { coords:[], category }
+  // 駅名 → 区間ラベル（区間定義のある JR 路線のみ）。
+  const stationToSection = {} // 路線名 -> { 駅名: label }
+  for (const [line, secs] of Object.entries(LINE_SECTIONS)) {
+    const m = (stationToSection[line] = {})
+    for (const s of secs) for (const name of s.stations) m[name] = s.label
+  }
+  // 区間割り当て用に、JR 路線ごとの駅座標を集める。
+  const jrLineStations = {} // 路線名 -> [{ name, x, y }]
+  for (const f of st.features) {
+    if (f.properties.N02_004 !== JR_OPERATOR) continue
+    const ln = f.properties.N02_003
+    if (!LINE_SECTIONS[ln]) continue
+    const [cx, cy] = centroid(f.geometry.coordinates)
+    if (!inChiba(cx, cy)) continue
+    ;(jrLineStations[ln] = jrLineStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy })
+  }
+  // 点に最も近い駅の区間ラベルを返す。
+  const sectionOf = (line, x, y) => {
+    let best = null, bestD = Infinity
+    for (const s of jrLineStations[line] || []) {
+      const d = (s.x - x) ** 2 + (s.y - y) ** 2
+      if (d < bestD) { bestD = d; best = s.name }
+    }
+    return (best && stationToSection[line][best]) || LINE_SECTIONS[line][0].label
+  }
+
+  // --- 路線: Chiba 内のセグメントを「区間ラベル（区間定義あり）」または
+  //     「表示路線名（区間定義なし）」ごとに MultiLineString へまとめる ---
+  const lines = {} // キー -> { coords:[], category, line(親), section? }
   for (const f of rs.features) {
     const [mx, my] = midPoint(f.geometry.coordinates)
     if (!inChiba(mx, my)) continue
     const op = f.properties.N02_004
     const name = displayLineName(op, f.properties.N02_003)
     const category = op === JR_OPERATOR ? 'jr' : 'private'
-    const e = (lines[name] = lines[name] || { coords: [], category })
+    let key = name, section
+    if (op === JR_OPERATOR && LINE_SECTIONS[name]) {
+      section = sectionOf(name, mx, my)
+      key = section
+    }
+    const e = (lines[key] = lines[key] || { coords: [], category, line: name, section })
     e.coords.push(f.geometry.coordinates)
   }
-  const railwayFeatures = Object.keys(lines)
-    .sort()
-    .map((name) => ({
-      type: 'Feature',
-      properties: {
-        line: name,
-        category: lines[name].category,
-        color: LINE_COLORS[name] || DEFAULT_COLOR,
-      },
-      geometry: { type: 'MultiLineString', coordinates: lines[name].coords },
-    }))
-  // 凡例の並びを JR → 私鉄 にする。
+  const railwayFeatures = Object.keys(lines).map((key) => {
+    const e = lines[key]
+    const props = {
+      line: e.line,
+      category: e.category,
+      color: LINE_COLORS[e.line] || DEFAULT_COLOR,
+      trains: TRAINS[key] ?? DEFAULT_TRAINS,
+    }
+    if (e.section) props.section = e.section
+    return { type: 'Feature', properties: props, geometry: { type: 'MultiLineString', coordinates: e.coords } }
+  })
+  // 並びを JR → 私鉄、路線名、区間 にする。
   railwayFeatures.sort((a, b) => {
     if (a.properties.category !== b.properties.category)
       return a.properties.category === 'jr' ? -1 : 1
-    return a.properties.line.localeCompare(b.properties.line, 'ja')
+    if (a.properties.line !== b.properties.line)
+      return a.properties.line.localeCompare(b.properties.line, 'ja')
+    return (a.properties.section || '').localeCompare(b.properties.section || '', 'ja')
   })
 
   // --- 駅: 駅名で集約（乗換駅は複数路線をまとめて 1 点に）---
@@ -235,10 +278,12 @@ function main() {
   const jrLines = railwayFeatures.filter((f) => f.properties.category === 'jr')
   const pvLines = railwayFeatures.filter((f) => f.properties.category === 'private')
   const majorCount = stationFeatures.filter((f) => f.properties.major).length
-  console.log(`路線: JR ${jrLines.length} / 私鉄 ${pvLines.length}`)
-  railwayFeatures.forEach((f) =>
-    console.log(`  [${f.properties.category}] ${f.properties.line} ${f.properties.color}`),
-  )
+  console.log(`路線フィーチャ: JR ${jrLines.length} / 私鉄 ${pvLines.length}`)
+  railwayFeatures.forEach((f) => {
+    const p = f.properties
+    const label = p.section ? `${p.line} ／ ${p.section}` : p.line
+    console.log(`  [${p.category}] ${String(p.trains).padStart(4)}本  ${label}`)
+  })
   console.log(`駅: ${stationFeatures.length}（主要 ${majorCount}）`)
 }
 
