@@ -1,5 +1,5 @@
 /**
- * 千葉県内の JR 東日本 路線・駅データを生成するビルドスクリプト。
+ * 千葉県内の鉄道（JR 東日本＋私鉄・三セク）の路線・駅データを生成するビルドスクリプト。
  *
  * 入力（無料の公開データ。リポジトリには含めないので各自取得する）:
  *   - 国土数値情報 鉄道データ N02（GeoJSON）
@@ -11,10 +11,11 @@
  * 使い方:
  *   N02_DIR=/path/to/N02/UTF-8 JAPAN_GEOJSON=/path/to/japan.geojson \
  *     node scripts/build-chiba-jr.cjs
+ *   （既定では ./.data/ 配下を参照する）
  *
  * 出力（リポジトリにコミットする静的データ）:
- *   - public/data/chiba-jr-railways.geojson  路線（路線ごとの MultiLineString）
- *   - public/data/chiba-jr-stations.geojson  駅（Point。major=主要駅フラグ）
+ *   - public/data/chiba-railways.geojson  路線（路線ごとの MultiLineString、category=jr|private）
+ *   - public/data/chiba-stations.geojson  駅（Point。isJr/isPrivate/major）
  */
 const fs = require('fs')
 const path = require('path')
@@ -24,11 +25,30 @@ const JAPAN_GEOJSON =
   process.env.JAPAN_GEOJSON || path.resolve(__dirname, '../.data/japan.geojson')
 const OUT_DIR = path.resolve(__dirname, '../public/data')
 
-const JR = '東日本旅客鉄道'
+const JR_OPERATOR = '東日本旅客鉄道'
 const CHIBA_ID = 12
 
-/** 路線カラー（白地図上で識別しやすい配色）。 */
+/**
+ * 私鉄の路線表示名の補正（事業者名|N02路線名 → 表示名）。
+ * 「本線」「1号線」など事業者をまたいで重複・曖昧な名前を分かりやすくする。
+ */
+const LINE_NAME_OVERRIDES = {
+  '京成電鉄|本線': '京成本線',
+  '京成電鉄|千葉線': '京成千葉線',
+  '京成電鉄|千原線': '京成千原線',
+  '京成電鉄|東成田線': '京成東成田線',
+  '京成電鉄|成田空港線': '成田スカイアクセス線',
+  '千葉都市モノレール|1号線': '千葉モノレール1号線',
+  '千葉都市モノレール|2号線': '千葉モノレール2号線',
+  '東京地下鉄|5号線東西線': '東京メトロ東西線',
+  '東京都|10号線新宿線': '都営新宿線',
+  '東武鉄道|野田線': '東武野田線',
+  '首都圏新都市鉄道|常磐新線': 'つくばエクスプレス',
+}
+
+/** 路線カラー（白地図上で識別しやすい配色）。表示名でひく。 */
 const LINE_COLORS = {
+  // JR 東日本
   総武線: '#F2C500',
   京葉線: '#C9252F',
   外房線: '#E8382C',
@@ -39,17 +59,44 @@ const LINE_COLORS = {
   武蔵野線: '#8E44AD',
   常磐線: '#00A0A0',
   鹿島線: '#7F5A3C',
+  // 私鉄・三セク
+  京成本線: '#005BAC',
+  京成千葉線: '#3DA9E0',
+  京成千原線: '#67A82E',
+  京成東成田線: '#9E7BB5',
+  成田スカイアクセス線: '#EE7800',
+  北総線: '#13469B',
+  新京成線: '#E85298',
+  東京メトロ東西線: '#009BBF',
+  都営新宿線: '#6CBB5A',
+  東武野田線: '#54B948',
+  東葉高速線: '#B5651D',
+  千葉モノレール1号線: '#00838F',
+  千葉モノレール2号線: '#4DB6AC',
+  つくばエクスプレス: '#1B2F8A',
+  小湊鐵道線: '#D7003A',
+  いすみ線: '#F2B500',
+  ユーカリが丘線: '#8C8C8C',
+  ディズニーリゾートライン: '#FF77AA',
+  銚子電気鉄道線: '#7A4FBF',
+  芝山鉄道線: '#9A9A33',
+  流山線: '#C2185B',
 }
 const DEFAULT_COLOR = '#666666'
 
 /** 乗換駅に加えて主要駅（ターミナル・拠点）としてラベルを出す駅。 */
 const MAJOR_STATIONS = new Set([
+  // JR
   '千葉', '船橋', '西船橋', '津田沼', '稲毛', '市川', '本八幡',
   '松戸', '柏', '我孫子', '成田', '成田空港', '空港第２ビル',
   '佐倉', '銚子', '八日市場', '旭', '成東', '東金', '大網',
   '茂原', '上総一ノ宮', '勝浦', '安房鴨川', '館山', '君津',
   '木更津', '五井', '蘇我', '大原', '久留里', '上総亀山',
   '香取', '佐原', '松岸', '新松戸', '海浜幕張', '舞浜',
+  // 私鉄の拠点
+  '京成船橋', '京成津田沼', '京成成田', '京成千葉', '千葉中央',
+  '新鎌ヶ谷', '勝田台', '八千代台', '北習志野', '流山おおたかの森',
+  'ユーカリが丘', '五香',
 ])
 
 function load(p) {
@@ -111,50 +158,69 @@ function centroid(coords) {
   return [sx / coords.length, sy / coords.length]
 }
 
+/** N02 の事業者名・路線名から表示用の路線名を決める。 */
+function displayLineName(operator, rawName) {
+  return LINE_NAME_OVERRIDES[`${operator}|${rawName}`] || rawName
+}
+
 function main() {
   const japan = load(JAPAN_GEOJSON)
   const inChiba = buildChibaTest(japan)
   const rs = load(path.join(N02_DIR, 'N02-23_RailroadSection.geojson'))
   const st = load(path.join(N02_DIR, 'N02-23_Station.geojson'))
 
-  // --- 路線: 路線名ごとに Chiba 内のセグメントを MultiLineString にまとめる ---
-  const lineCoords = {} // 路線名 -> 座標列の配列
+  // --- 路線: 表示路線名ごとに Chiba 内のセグメントを MultiLineString にまとめる ---
+  const lines = {} // 表示名 -> { coords:[], category }
   for (const f of rs.features) {
-    if (f.properties.N02_004 !== JR) continue
     const [mx, my] = midPoint(f.geometry.coordinates)
     if (!inChiba(mx, my)) continue
-    const ln = f.properties.N02_003
-    ;(lineCoords[ln] = lineCoords[ln] || []).push(f.geometry.coordinates)
+    const op = f.properties.N02_004
+    const name = displayLineName(op, f.properties.N02_003)
+    const category = op === JR_OPERATOR ? 'jr' : 'private'
+    const e = (lines[name] = lines[name] || { coords: [], category })
+    e.coords.push(f.geometry.coordinates)
   }
-  const railwayFeatures = Object.keys(lineCoords)
+  const railwayFeatures = Object.keys(lines)
     .sort()
-    .map((ln) => ({
+    .map((name) => ({
       type: 'Feature',
-      properties: { line: ln, color: LINE_COLORS[ln] || DEFAULT_COLOR },
-      geometry: { type: 'MultiLineString', coordinates: lineCoords[ln] },
+      properties: {
+        line: name,
+        category: lines[name].category,
+        color: LINE_COLORS[name] || DEFAULT_COLOR,
+      },
+      geometry: { type: 'MultiLineString', coordinates: lines[name].coords },
     }))
+  // 凡例の並びを JR → 私鉄 にする。
+  railwayFeatures.sort((a, b) => {
+    if (a.properties.category !== b.properties.category)
+      return a.properties.category === 'jr' ? -1 : 1
+    return a.properties.line.localeCompare(b.properties.line, 'ja')
+  })
 
   // --- 駅: 駅名で集約（乗換駅は複数路線をまとめて 1 点に）---
-  const stationMap = {} // 駅名 -> { pts:[[x,y]], lines:Set }
+  const stationMap = {} // 駅名 -> { pts:[], lines:Set, jr, priv }
   for (const f of st.features) {
-    if (f.properties.N02_004 !== JR) continue
     const c = f.geometry.coordinates
     const [cx, cy] = centroid(c)
     if (!inChiba(cx, cy)) continue
+    const op = f.properties.N02_004
     const name = f.properties.N02_005
-    const ln = f.properties.N02_003
-    const e = (stationMap[name] = stationMap[name] || { pts: [], lines: new Set() })
+    const e = (stationMap[name] =
+      stationMap[name] || { pts: [], lines: new Set(), jr: false, priv: false })
     e.pts.push([cx, cy])
-    e.lines.add(ln)
+    e.lines.add(displayLineName(op, f.properties.N02_003))
+    if (op === JR_OPERATOR) e.jr = true
+    else e.priv = true
   }
   const stationFeatures = Object.entries(stationMap)
     .map(([name, e]) => {
       const [x, y] = centroid(e.pts)
-      const lines = [...e.lines]
-      const major = lines.length > 1 || MAJOR_STATIONS.has(name)
+      const lineList = [...e.lines]
+      const major = lineList.length > 1 || MAJOR_STATIONS.has(name)
       return {
         type: 'Feature',
-        properties: { name, lines, major },
+        properties: { name, lines: lineList, isJr: e.jr, isPrivate: e.priv, major },
         geometry: { type: 'Point', coordinates: [x, y] },
       }
     })
@@ -163,15 +229,17 @@ function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const railways = { type: 'FeatureCollection', features: railwayFeatures }
   const stations = { type: 'FeatureCollection', features: stationFeatures }
-  fs.writeFileSync(path.join(OUT_DIR, 'chiba-jr-railways.geojson'), JSON.stringify(railways))
-  fs.writeFileSync(path.join(OUT_DIR, 'chiba-jr-stations.geojson'), JSON.stringify(stations))
+  fs.writeFileSync(path.join(OUT_DIR, 'chiba-railways.geojson'), JSON.stringify(railways))
+  fs.writeFileSync(path.join(OUT_DIR, 'chiba-stations.geojson'), JSON.stringify(stations))
 
+  const jrLines = railwayFeatures.filter((f) => f.properties.category === 'jr')
+  const pvLines = railwayFeatures.filter((f) => f.properties.category === 'private')
   const majorCount = stationFeatures.filter((f) => f.properties.major).length
-  console.log(`路線: ${railwayFeatures.length} 本`)
+  console.log(`路線: JR ${jrLines.length} / 私鉄 ${pvLines.length}`)
   railwayFeatures.forEach((f) =>
-    console.log(`  ${f.properties.line} (${f.geometry.coordinates.length} seg) ${f.properties.color}`),
+    console.log(`  [${f.properties.category}] ${f.properties.line} ${f.properties.color}`),
   )
-  console.log(`駅: ${stationFeatures.length} 駅（うち主要駅ラベル ${majorCount}）`)
+  console.log(`駅: ${stationFeatures.length}（主要 ${majorCount}）`)
 }
 
 main()
