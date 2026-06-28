@@ -40,8 +40,8 @@ type StationProps = {
 type RailwaysData = FeatureCollection<LineString | MultiLineString, LineProps>
 type StationsData = FeatureCollection<Point, StationProps>
 
-const RAILWAYS_URL = `${import.meta.env.BASE_URL}data/chiba-railways.geojson`
-const STATIONS_URL = `${import.meta.env.BASE_URL}data/chiba-stations.geojson`
+const RAILWAYS_URL = `${import.meta.env.BASE_URL}data/railways.geojson`
+const STATIONS_URL = `${import.meta.env.BASE_URL}data/stations.geojson`
 
 // 線種の境界値・太さは lineStyle.ts（別ファイル）で定義。
 const { thresholds: TH, line: LINE_W, casing: CASING_W, dashed: DASHED } = LINE_STYLE
@@ -173,7 +173,8 @@ type PopupInfo =
 const CLICK_LAYERS = ['stations', 'route-lines-hit']
 
 /**
- * 国土地理院の白地図タイル上に、千葉県内の鉄道（JR＋私鉄）の全路線・全駅を重ねて表示する。
+ * 国土地理院の白地図タイル上に、南関東一都三県（埼玉・千葉・東京・神奈川）の鉄道
+ * （JR＋私鉄）の全路線・全駅を重ねて表示する。
  * 路線・駅データは public/data の GeoJSON（国土数値情報 N02 由来）を読み込む。
  * 凡例のチェックボックスで JR / 私鉄 の表示を切り替えられる。
  */
@@ -361,7 +362,7 @@ export default function MapView() {
 
         {labeledStations.map((f) => (
           <Marker
-            key={f.properties.name}
+            key={`${f.properties.name}:${f.geometry.coordinates[0]},${f.geometry.coordinates[1]}`}
             longitude={f.geometry.coordinates[0]}
             latitude={f.geometry.coordinates[1]}
             anchor="left"

@@ -1,5 +1,5 @@
 /**
- * 路線・区間・本数の定義 CSV（data/chiba-lines.csv）の読み書き。
+ * 路線・区間・本数の定義 CSV（data/lines.csv）の読み書き。
  *
  * 列: 路線,区間,本数,駅
  *   - 路線: 親路線の表示名（凡例・色のキー。例: 総武線 / 京成本線）
@@ -14,7 +14,7 @@
 const fs = require('fs')
 const path = require('path')
 
-const CSV_PATH = path.resolve(__dirname, '../data/chiba-lines.csv')
+const CSV_PATH = path.resolve(__dirname, '../data/lines.csv')
 const HEADER = '路線,区間,本数,駅'
 
 /** 本数のキー（区間優先）。 */

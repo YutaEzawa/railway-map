@@ -1,6 +1,6 @@
 # 設計書: 千葉県 鉄道路線図
 
-国土地理院の**白地図タイル**を背景に、千葉県内の鉄道（JR 東日本＋私鉄・三セク）の全路線・全駅を**実緯度経度**で表示する Web アプリの設計書。
+国土地理院の**白地図タイル**を背景に、南関東一都三県（埼玉・千葉・東京・神奈川）の鉄道（JR 東日本＋私鉄・三セク）の全路線・全駅を**実緯度経度**で表示する Web アプリの設計書。
 
 ## 目次
 
@@ -30,7 +30,7 @@
 | 区分 | 実体 |
 |---|---|
 | フロントエンド | `src/`（React + MapLibre GL） |
-| 静的データ（配信） | `public/data/chiba-railways.geojson` / `chiba-stations.geojson` |
-| 手編集の設定 | `data/chiba-lines.csv`（区間・本数）/ `data/line-style.json`（線の太さ・境界値） |
-| データ生成スクリプト | `scripts/build-chiba-jr.cjs` ほか |
+| 静的データ（配信） | `public/data/railways.geojson` / `stations.geojson` |
+| 手編集の設定 | `data/lines.csv`（区間・本数）/ `data/line-style.json`（線の太さ・境界値） |
+| データ生成スクリプト | `scripts/build-railways.cjs` ほか |
 | 秘密情報・環境変数 | `.env`（`.env.example` が雛形） |

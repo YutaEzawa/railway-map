@@ -5,7 +5,7 @@
 ## 背景地図（`config.ts`）
 
 - `WHITE_MAP_STYLE`: 国土地理院 白地図ラスタ（`https://cyberjapandata.gsi.go.jp/xyz/blank/{z}/{x}/{y}.png`、`maxzoom: 14`）1 枚のみの最小スタイル。`raster-opacity: 0.9`。
-- `INITIAL_VIEW_STATE`: 千葉県全体（おおよそ lng 140.2 / lat 35.5 / zoom 8.6）。
+- `INITIAL_VIEW_STATE`: 南関東一都三県の本土全体（おおよそ lng 139.75 / lat 35.65 / zoom 8.2）。
 - `MAX_ZOOM`: 16（白地図は z14 まで、overzoom で 16 まで拡大表示）。
 - attribution に「国土地理院」「国土数値情報（鉄道データ）」を表示。
 

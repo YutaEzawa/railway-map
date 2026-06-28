@@ -1,21 +1,22 @@
 /**
- * 千葉県内の鉄道（JR 東日本＋私鉄・三セク）の路線・駅データを生成するビルドスクリプト。
+ * 南関東一都三県（埼玉・千葉・東京・神奈川）の鉄道（JR 東日本＋私鉄・三セク）の
+ * 路線・駅データを生成するビルドスクリプト。
  *
  * 入力（無料の公開データ。リポジトリには含めないので各自取得する）:
- *   - 国土数値情報 鉄道データ N02（GeoJSON）
+ *   - 国土数値情報 鉄道データ N02（GeoJSON。全国版）
  *       https://nlftp.mlit.go.jp/ksj/gml/data/N02/N02-23/N02-23_GML.zip
  *       展開後の N02-23_RailroadSection.geojson / N02-23_Station.geojson
- *   - 都道府県境界 GeoJSON（千葉県ポリゴンの切り出しに使用）
+ *   - 都道府県境界 GeoJSON（対象都県ポリゴンの切り出しに使用）
  *       https://raw.githubusercontent.com/dataofjapan/land/master/japan.geojson
  *
  * 使い方:
  *   N02_DIR=/path/to/N02/UTF-8 JAPAN_GEOJSON=/path/to/japan.geojson \
- *     node scripts/build-chiba-jr.cjs
+ *     node scripts/build-railways.cjs
  *   （既定では ./.data/ 配下を参照する）
  *
  * 出力（リポジトリにコミットする静的データ）:
- *   - public/data/chiba-railways.geojson  路線（路線ごとの MultiLineString、category=jr|private）
- *   - public/data/chiba-stations.geojson  駅（Point。isJr/isPrivate/major）
+ *   - public/data/railways.geojson  路線（路線ごとの MultiLineString、category=jr|private）
+ *   - public/data/stations.geojson  駅（Point。isJr/isPrivate/major）
  */
 require('./load-env.cjs')
 const fs = require('fs')
@@ -28,12 +29,16 @@ const JAPAN_GEOJSON =
 const OUT_DIR = path.resolve(__dirname, '../public/data')
 
 const JR_OPERATOR = '東日本旅客鉄道'
-const CHIBA_ID = 12
+/** 対象都県（japan.geojson の id）。埼玉=11 / 千葉=12 / 東京=13 / 神奈川=14。 */
+const TARGET_PREF_IDS = [11, 12, 13, 14]
 
 /** 本数が見つからない路線の既定値。 */
 const DEFAULT_TRAINS = 30
 
-// 区間定義・本数は data/chiba-lines.csv（手編集）から読み込む。
+/** 同名駅を同一駅とみなす最大距離（度。約 2km）。これを超えると別駅として分割。 */
+const STATION_CLUSTER_DIST = 0.02
+
+// 区間定義・本数は data/lines.csv（手編集）から読み込む。
 const CSV_ROWS = readRows()
 const LINE_SECTIONS = toSections(CSV_ROWS) // { 路線名: [{label, stations}] }
 const TRAINS = toTrains(CSV_ROWS) // { 区間 or 路線: 本数 }
@@ -79,7 +84,60 @@ const LINE_NAME_OVERRIDES = {
   '東京地下鉄|5号線東西線': '東京メトロ東西線',
   '東京都|10号線新宿線': '都営新宿線',
   '東武鉄道|野田線': '東武野田線',
+  '東武鉄道|伊勢崎線': '東武伊勢崎線',
+  '東武鉄道|東上本線': '東武東上線',
+  '東武鉄道|日光線': '東武日光線',
+  '東武鉄道|亀戸線': '東武亀戸線',
+  '東武鉄道|越生線': '東武越生線',
+  '京成電鉄|押上線': '京成押上線',
+  '京成電鉄|金町線': '京成金町線',
   '首都圏新都市鉄道|常磐新線': 'つくばエクスプレス',
+  // 在圏内で別事業者が同名になる路線の分離（統合されると別路線が 1 本になる）。
+  '京浜急行電鉄|本線': '京急本線',
+  '京浜急行電鉄|大師線': '京急大師線',
+  '東武鉄道|大師線': '東武大師線',
+  // 東京メトロ（N02 は「N号線◯◯線」表記。東西線は上で定義済み）。
+  '東京地下鉄|3号線銀座線': '東京メトロ銀座線',
+  '東京地下鉄|4号線丸ノ内線': '東京メトロ丸ノ内線',
+  '東京地下鉄|4号線丸ノ内線分岐線': '東京メトロ丸ノ内線',
+  '東京地下鉄|2号線日比谷線': '東京メトロ日比谷線',
+  '東京地下鉄|9号線千代田線': '東京メトロ千代田線',
+  '東京地下鉄|8号線有楽町線': '東京メトロ有楽町線',
+  '東京地下鉄|11号線半蔵門線': '東京メトロ半蔵門線',
+  '東京地下鉄|7号線南北線': '東京メトロ南北線',
+  '東京地下鉄|13号線副都心線': '東京メトロ副都心線',
+  // 都営地下鉄・都電（新宿線は上で定義済み）。
+  '東京都|1号線浅草線': '都営浅草線',
+  '東京都|6号線三田線': '都営三田線',
+  '東京都|12号線大江戸線': '都営大江戸線',
+  '東京都|荒川線': '都電荒川線',
+  // 横浜市営地下鉄（1号線＋3号線＝ブルーライン、4号線＝グリーンライン）。
+  '横浜市|1号線': '横浜市営ブルーライン',
+  '横浜市|3号線': '横浜市営ブルーライン',
+  '横浜市|4号線': '横浜市営グリーンライン',
+  // 京急（本線・大師線は上で定義済み）。
+  '京浜急行電鉄|空港線': '京急空港線',
+  '京浜急行電鉄|久里浜線': '京急久里浜線',
+  '京浜急行電鉄|逗子線': '京急逗子線',
+  // 西武（他社にも同名・あいまい名がある路線を明示）。
+  '西武鉄道|池袋線': '西武池袋線',
+  '西武鉄道|新宿線': '西武新宿線',
+  '西武鉄道|多摩川線': '西武多摩川線',
+  '西武鉄道|山口線': '西武山口線',
+  // 小田急（湘南モノレール「江の島線」と紛らわしいため）。
+  '小田急電鉄|江ノ島線': '小田急江ノ島線',
+  // 新交通・モノレール・登山鉄道などの分かりにくい N02 名。
+  'ゆりかもめ|東京臨海新交通臨海線': 'ゆりかもめ',
+  '東京臨海高速鉄道|臨海副都心線': 'りんかい線',
+  '湘南モノレール|江の島線': '湘南モノレール',
+  '江ノ島電鉄|江ノ島電鉄線': '江ノ島電鉄',
+  '埼玉新都市交通|伊奈線': 'ニューシャトル',
+  '箱根登山鉄道|鉄道線': '箱根登山鉄道',
+  '箱根登山鉄道|鋼索線': '箱根登山ケーブルカー',
+  '御岳登山鉄道|ケーブルカー': '御岳登山ケーブルカー',
+  '高尾登山電鉄|高尾鋼索線': '高尾登山ケーブルカー',
+  '大山観光電鉄|大山鋼索線': '大山ケーブルカー',
+  '伊豆箱根鉄道|大雄山線': '伊豆箱根大雄山線',
 }
 
 /** 路線カラー（白地図上で識別しやすい配色）。表示名でひく。 */
@@ -117,6 +175,120 @@ const LINE_COLORS = {
   銚子電気鉄道線: '#7A4FBF',
   芝山鉄道線: '#9A9A33',
   流山線: '#C2185B',
+
+  // ===== 南関東への拡大で追加（各社公式のラインカラーをベースに） =====
+  // JR 東日本（駅ナンバリングのラインカラー）
+  山手線: '#9ACD32',
+  根岸線: '#00BAE8', // 京浜東北・根岸線
+  東北線: '#00BAE8', // 京浜東北線（東京〜大宮）
+  東海道線: '#F68B1E',
+  高崎線: '#F68B1E',
+  中央線: '#F15A22', // 中央線快速
+  青梅線: '#F15A22',
+  五日市線: '#F15A22',
+  横須賀線: '#0072BC',
+  横浜線: '#80C342',
+  南武線: '#FBD05D',
+  鶴見線: '#FFD400',
+  八高線: '#A8A39D',
+  川越線: '#00AC9A', // 川越線・埼京線
+  赤羽線: '#00AC9A', // 埼京線（池袋〜赤羽）
+  相模線: '#009793',
+  東北新幹線: '#2CA13A',
+  上越新幹線: '#2CA13A',
+  // JR 東海
+  東海道新幹線: '#2E5BA0',
+  御殿場線: '#F77F00',
+  // 東京メトロ（公式コーポレートカラー）
+  東京メトロ銀座線: '#FF9500',
+  東京メトロ丸ノ内線: '#F62E36',
+  東京メトロ日比谷線: '#B5B5AC',
+  東京メトロ千代田線: '#00BB85',
+  東京メトロ有楽町線: '#C1A470',
+  東京メトロ半蔵門線: '#8F76D6',
+  東京メトロ南北線: '#00ADA9',
+  東京メトロ副都心線: '#9C5E31',
+  // 都営地下鉄・都電
+  都営浅草線: '#E85298',
+  都営三田線: '#0079C2',
+  都営大江戸線: '#B6007A',
+  都電荒川線: '#E60012',
+  // 横浜市営地下鉄
+  横浜市営ブルーライン: '#0070C0',
+  横浜市営グリーンライン: '#00A650',
+  金沢シーサイドライン: '#0091D2',
+  // 京王
+  京王線: '#DD0077',
+  高尾線: '#DD0077',
+  相模原線: '#DD0077',
+  競馬場線: '#DD0077',
+  動物園線: '#DD0077',
+  井の頭線: '#0079C3',
+  // 小田急
+  小田原線: '#0067C0',
+  小田急江ノ島線: '#0067C0',
+  多摩線: '#0067C0',
+  // 東急
+  東横線: '#DA0442',
+  目黒線: '#009CD2',
+  田園都市線: '#20A23B',
+  大井町線: '#F18D00',
+  池上線: '#EE86A8',
+  東急多摩川線: '#B4007F',
+  世田谷線: '#FABE00',
+  こどもの国線: '#6BBF4B',
+  東急新横浜線: '#00A0B0',
+  // 京急（空港線のみエアポート青、他は京急レッド）
+  京急本線: '#E60012',
+  京急久里浜線: '#E60012',
+  京急逗子線: '#E60012',
+  京急大師線: '#E60012',
+  京急空港線: '#0099D9',
+  // 西武（西武ブルー）
+  西武池袋線: '#00A0E9',
+  西武新宿線: '#00A0E9',
+  西武秩父線: '#00A0E9',
+  拝島線: '#00A0E9',
+  多摩湖線: '#00A0E9',
+  西武多摩川線: '#00A0E9',
+  国分寺線: '#00A0E9',
+  西武山口線: '#00A0E9',
+  狭山線: '#00A0E9',
+  西武園線: '#00A0E9',
+  西武有楽町線: '#00A0E9',
+  豊島線: '#00A0E9',
+  // 東武（東武ブルー。野田線は上で定義済み）
+  東武伊勢崎線: '#006FBC',
+  東武東上線: '#006FBC',
+  東武日光線: '#006FBC',
+  東武亀戸線: '#006FBC',
+  東武大師線: '#006FBC',
+  東武越生線: '#006FBC',
+  // 相鉄（YOKOHAMA NAVYBLUE）
+  相鉄本線: '#002B7F',
+  相鉄いずみ野線: '#002B7F',
+  相鉄新横浜線: '#002B7F',
+  // 京成（押上線・金町線は京成ブルー）
+  京成押上線: '#005BAC',
+  京成金町線: '#005BAC',
+  // 新交通・モノレール・その他
+  ゆりかもめ: '#0068B7',
+  りんかい線: '#00A0C6',
+  東京モノレール羽田線: '#C8102E',
+  多摩都市モノレール線: '#6FB92C',
+  埼玉高速鉄道線: '#0086CB',
+  ニューシャトル: '#6CBE45',
+  '日暮里・舎人ライナー': '#C9258B',
+  みなとみらい21線: '#0B318F',
+  江ノ島電鉄: '#009844',
+  湘南モノレール: '#2B57A6',
+  箱根登山鉄道: '#E60012',
+  箱根登山ケーブルカー: '#F39800',
+  御岳登山ケーブルカー: '#009844',
+  高尾登山ケーブルカー: '#E60012',
+  大山ケーブルカー: '#006FBC',
+  伊豆箱根大雄山線: '#1267B5',
+  秩父本線: '#00913A',
 }
 const DEFAULT_COLOR = '#666666'
 
@@ -139,14 +311,16 @@ function load(p) {
   return JSON.parse(fs.readFileSync(p, 'utf8'))
 }
 
-// --- 千葉県ポリゴンによる内外判定 ---
-function buildChibaTest(japan) {
-  const chiba = japan.features.find((f) => f.properties.id === CHIBA_ID)
-  if (!chiba) throw new Error('千葉県のフィーチャが見つかりません')
+// --- 対象都県ポリゴンによる内外判定（複数都県の和集合） ---
+function buildPrefTest(japan, ids) {
   const polys = []
-  const g = chiba.geometry
-  if (g.type === 'Polygon') polys.push(g.coordinates)
-  else if (g.type === 'MultiPolygon') g.coordinates.forEach((p) => polys.push(p))
+  for (const id of ids) {
+    const pref = japan.features.find((f) => f.properties.id === id)
+    if (!pref) throw new Error(`都県フィーチャが見つかりません: id=${id}`)
+    const g = pref.geometry
+    if (g.type === 'Polygon') polys.push(g.coordinates)
+    else if (g.type === 'MultiPolygon') g.coordinates.forEach((p) => polys.push(p))
+  }
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   polys.forEach((p) =>
@@ -206,7 +380,7 @@ function orientWestEast(coords) {
 
 function main() {
   const japan = load(JAPAN_GEOJSON)
-  const inChiba = buildChibaTest(japan)
+  const inTarget = buildPrefTest(japan, TARGET_PREF_IDS)
   const rs = load(path.join(N02_DIR, 'N02-23_RailroadSection.geojson'))
   const st = load(path.join(N02_DIR, 'N02-23_Station.geojson'))
 
@@ -222,7 +396,7 @@ function main() {
     const ln = displayLineName(f.properties.N02_004, f.properties.N02_003)
     if (!LINE_SECTIONS[ln] && !SERVICE_LINES[ln]) continue
     const [cx, cy] = centroid(f.geometry.coordinates)
-    if (!inChiba(cx, cy)) continue
+    if (!inTarget(cx, cy)) continue
     ;(lineStations[ln] = lineStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy })
   }
   // 点に最も近い駅名を返す。
@@ -248,12 +422,24 @@ function main() {
     return !!na && !!nb && set.has(na) && set.has(nb)
   }
 
-  // --- 路線: Chiba 内のセグメントを出力先（区間ラベル / 並走サービス / 路線名）へ
+  // --- 路線: 対象都県内のセグメントを出力先（区間ラベル / 並走サービス / 路線名）へ
   //     振り分けて MultiLineString へまとめる。並走サービスは 1 セグメントを複数出力 ---
+  // 採否は「いずれかの頂点が圏内（約1kmのバッファ込み）」。中点だけだと東京湾の
+  // 埋立地・人工島を渡る区間（ゆりかもめのお台場ループ、東京モノレールの整備場〜
+  // 昭和島など）の頂点が、海上で粗い県境ポリゴンの外に落ちて区間が欠落するため、
+  // 県境から少し外側まで含める。
+  // 約0.8km。湾岸の埋立地区間を拾いつつ、隣県（茨城の常総線など）を巻き込まない値。
+  const BORDER_BUFFER = 0.008
+  const nearTarget = (x, y) =>
+    inTarget(x, y) ||
+    inTarget(x + BORDER_BUFFER, y) ||
+    inTarget(x - BORDER_BUFFER, y) ||
+    inTarget(x, y + BORDER_BUFFER) ||
+    inTarget(x, y - BORDER_BUFFER)
   const lines = {} // キー -> { coords, category, line, color, section?, offset? }
   for (const f of rs.features) {
+    if (!f.geometry.coordinates.some(([x, y]) => nearTarget(x, y))) continue
     const [mx, my] = midPoint(f.geometry.coordinates)
-    if (!inChiba(mx, my)) continue
     const op = f.properties.N02_004
     const name = displayLineName(op, f.properties.N02_003)
     const category = op === JR_OPERATOR ? 'jr' : 'private'
@@ -292,39 +478,62 @@ function main() {
     return (a.properties.section || '').localeCompare(b.properties.section || '', 'ja')
   })
 
-  // --- 駅: 駅名で集約（乗換駅は複数路線をまとめて 1 点に）---
-  const stationMap = {} // 駅名 -> { pts:[], lines:Set, jr, priv }
+  // --- 駅: 駅名で集約。ただし同名でも離れた別駅は別点に分ける ---
+  // N02 は同一物理駅を事業者・路線ごとに別フィーチャで持つので駅名で寄せる。
+  // ただし広域化すると同名・別location の駅（例: 栄町＝千葉モノレール/都電荒川線、
+  // 永田＝外房線/秩父鉄道）が混ざるため、駅名の中で近接クラスタ単位に分けて
+  // それぞれ 1 点にする（霞ヶ関のメトロ3線は同一駅、東武東上の霞ヶ関は別点、を満たす）。
+  const stationRecords = {} // 駅名 -> [{ x, y, line, jr }]
   for (const f of st.features) {
-    const c = f.geometry.coordinates
-    const [cx, cy] = centroid(c)
-    if (!inChiba(cx, cy)) continue
+    const [cx, cy] = centroid(f.geometry.coordinates)
+    if (!inTarget(cx, cy)) continue
     const op = f.properties.N02_004
-    const name = f.properties.N02_005
-    const e = (stationMap[name] =
-      stationMap[name] || { pts: [], lines: new Set(), jr: false, priv: false })
-    e.pts.push([cx, cy])
-    e.lines.add(displayLineName(op, f.properties.N02_003))
-    if (op === JR_OPERATOR) e.jr = true
-    else e.priv = true
-  }
-  const stationFeatures = Object.entries(stationMap)
-    .map(([name, e]) => {
-      const [x, y] = centroid(e.pts)
-      const lineList = [...e.lines]
-      const major = lineList.length > 1 || MAJOR_STATIONS.has(name)
-      return {
-        type: 'Feature',
-        properties: { name, lines: lineList, isJr: e.jr, isPrivate: e.priv, major },
-        geometry: { type: 'Point', coordinates: [x, y] },
-      }
+    ;(stationRecords[f.properties.N02_005] = stationRecords[f.properties.N02_005] || []).push({
+      x: cx, y: cy, line: displayLineName(op, f.properties.N02_003), jr: op === JR_OPERATOR,
     })
-    .sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'ja'))
+  }
+  // 同名の駅レコードを近接クラスタへ分割（単連結・貪欲法）。
+  const clusterRecords = (recs) => {
+    const clusters = []
+    for (const r of recs) {
+      let target = null
+      for (const cl of clusters) {
+        if (cl.some((p) => Math.hypot(p.x - r.x, p.y - r.y) <= STATION_CLUSTER_DIST)) {
+          target = cl
+          break
+        }
+      }
+      if (target) target.push(r)
+      else clusters.push([r])
+    }
+    return clusters
+  }
+  const stationFeatures = []
+  for (const [name, recs] of Object.entries(stationRecords)) {
+    for (const cl of clusterRecords(recs)) {
+      const [x, y] = centroid(cl.map((p) => [p.x, p.y]))
+      const lineList = [...new Set(cl.map((p) => p.line))]
+      const major = lineList.length > 1 || MAJOR_STATIONS.has(name)
+      stationFeatures.push({
+        type: 'Feature',
+        properties: {
+          name,
+          lines: lineList,
+          isJr: cl.some((p) => p.jr),
+          isPrivate: cl.some((p) => !p.jr),
+          major,
+        },
+        geometry: { type: 'Point', coordinates: [x, y] },
+      })
+    }
+  }
+  stationFeatures.sort((a, b) => a.properties.name.localeCompare(b.properties.name, 'ja'))
 
   fs.mkdirSync(OUT_DIR, { recursive: true })
   const railways = { type: 'FeatureCollection', features: railwayFeatures }
   const stations = { type: 'FeatureCollection', features: stationFeatures }
-  fs.writeFileSync(path.join(OUT_DIR, 'chiba-railways.geojson'), JSON.stringify(railways))
-  fs.writeFileSync(path.join(OUT_DIR, 'chiba-stations.geojson'), JSON.stringify(stations))
+  fs.writeFileSync(path.join(OUT_DIR, 'railways.geojson'), JSON.stringify(railways))
+  fs.writeFileSync(path.join(OUT_DIR, 'stations.geojson'), JSON.stringify(stations))
 
   const jrLines = railwayFeatures.filter((f) => f.properties.category === 'jr')
   const pvLines = railwayFeatures.filter((f) => f.properties.category === 'private')

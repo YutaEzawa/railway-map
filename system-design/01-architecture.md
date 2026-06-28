@@ -17,11 +17,11 @@
 [国土数値情報 N02]  [県境 GeoJSON]            ← 入力（.data/、gitignore）
         \              /
          v            v
-   scripts/build-chiba-jr.cjs  ← data/chiba-lines.csv（区間・本数）を参照
+   scripts/build-railways.cjs  ← data/lines.csv（区間・本数）を参照
          |
          v
- public/data/chiba-railways.geojson         ← 生成物（コミット）
- public/data/chiba-stations.geojson
+ public/data/railways.geojson         ← 生成物（コミット）
+ public/data/stations.geojson
          |
          v (fetch: TanStack Query)
    src/map/MapView.tsx  ← data/line-style.json（線の太さ）を import
@@ -48,13 +48,13 @@ src/main.tsx → src/App.tsx → src/map/MapView.tsx
 ```
 railway-map/
 ├─ data/                         # 手編集の設定（コミット）
-│  ├─ chiba-lines.csv            #   路線・区間・本数・駅
+│  ├─ lines.csv            #   路線・区間・本数・駅
 │  └─ line-style.json            #   線の太さ・線種の境界値
 ├─ public/data/                  # 生成された静的 GeoJSON（コミット, 配信）
-│  ├─ chiba-railways.geojson
-│  └─ chiba-stations.geojson
+│  ├─ railways.geojson
+│  └─ stations.geojson
 ├─ scripts/                      # データ生成（Node, .cjs）
-│  ├─ build-chiba-jr.cjs         #   GeoJSON 生成（メイン）
+│  ├─ build-railways.cjs         #   GeoJSON 生成（メイン）
 │  ├─ lines-csv.cjs              #   CSV 読み書き共有モジュール
 │  ├─ fetch-odpt-trains.cjs      #   ODPT から本数取得→CSV更新（任意）
 │  └─ load-env.cjs               #   .env ローダー（依存なし）

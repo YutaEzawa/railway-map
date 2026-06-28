@@ -29,17 +29,17 @@
 - [ ] 実行ログの「未対応の路線ID」を見て、`scripts/fetch-odpt-trains.cjs` の
       `ODPT_RAILWAY_TO_LINE`（私鉄IDは推定値）を修正 → 再実行し、私鉄も ODPT 由来にする
 - [ ] `scripts/data/line-trains.json` の本数を確認・確定
-- [ ] 段階2: `scripts/build-chiba-jr.cjs` に `trains` を載せ、`src/map/MapView.tsx` の
+- [ ] 段階2: `scripts/build-railways.cjs` に `trains` を載せ、`src/map/MapView.tsx` の
       `line-width` を「本数 × ズーム」にして太さへ反映
 - [ ] `npm run build` / `npm run lint` 通過、地図の出典に ODPT を追記
 
 ---
 
 ## 現状メモ
-- **本数の単一ソースは `data/chiba-lines.csv`（手編集）**。列は `路線,区間,本数,駅`。
+- **本数の単一ソースは `data/lines.csv`（手編集）**。列は `路線,区間,本数,駅`。
   本数（平日・片方向）を人力で記載・修正できる。build はこの CSV を読む。
 - JR の総武・内房・外房・成田は**区間に分割**済み（CSV の区間行＋駅集合で地図上を区間ごとに描画）。
-  現在の本数は暫定の概算。CSV を編集すれば即反映（`node scripts/build-chiba-jr.cjs` → 再ビルド）。
+  現在の本数は暫定の概算。CSV を編集すれば即反映（`node scripts/build-railways.cjs` → 再ビルド）。
 - `scripts/fetch-odpt-trains.cjs` は、ODPT キーがあれば CSV の `本数` 列を実数で上書きする
   （取得できた区間のみ。手入力値は保持）。キー未設定なら CSV は変更しない。
 
@@ -59,7 +59,7 @@
 >    千葉県内の私鉄が漏れなく ODPT 由来の本数になるよう再実行する。
 > 2. `scripts/data/line-trains.json` の本数を提示して、一緒に確認する。
 >    （JR は当面 manual のままでよい。チャレンジキー取得後に更新する）
-> 3. 確定したら段階2に進み、`scripts/build-chiba-jr.cjs` で各路線に `trains` を付与、
+> 3. 確定したら段階2に進み、`scripts/build-railways.cjs` で各路線に `trains` を付与、
 >    `src/map/MapView.tsx` の `line-width` を「本数 × ズーム」にして、路線の太さに反映する。
 > 4. `npm run build` と `npm run lint` を通し、地図の出典表示に ODPT を追記する。
 

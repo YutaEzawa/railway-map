@@ -1,12 +1,12 @@
 # railway-map
 
-千葉県内の鉄道（JR 東日本＋私鉄・三セク）全路線を、国土地理院の**白地図タイル**を背景に、**実緯度経度**で地図表示する Web アプリ。趣味で開発しているプロジェクトです。
+南関東一都三県（埼玉・千葉・東京・神奈川）の鉄道（JR 東日本＋私鉄・三セク）全路線を、国土地理院の**白地図タイル**を背景に、**実緯度経度**で地図表示する Web アプリ。趣味で開発しているプロジェクトです。
 
 **公開URL: https://railway-map.yuutae07.workers.dev**
 
 ## 概要
 
-国土地理院の白地図タイルを背景に、MapLibre GL（`react-map-gl`）で千葉県内の全鉄道路線・駅を実緯度経度で描画する。路線・駅データは国土数値情報（鉄道データ N02）から生成した GeoJSON を読み込む。凡例のチェックボックスで JR / 私鉄 の表示を切り替えられる。
+国土地理院の白地図タイルを背景に、MapLibre GL（`react-map-gl`）で南関東一都三県（埼玉・千葉・東京・神奈川）の全鉄道路線・駅を実緯度経度で描画する。路線・駅データは国土数値情報（鉄道データ N02）から生成した GeoJSON を読み込む。凡例のチェックボックスで JR / 私鉄 の表示を切り替えられる。
 
 ## 設計方針
 
@@ -29,9 +29,9 @@
 ### 地図・データ
 - 背景地図: 国土地理院 白地図タイル（`xyz/blank` ラスタ）
 - 路線・駅データ: 国土数値情報 鉄道データ N02 から生成した静的 GeoJSON
-  - `public/data/chiba-railways.geojson` — 路線（MultiLineString、`line` / `category` / `color` / `trains`）
-  - `public/data/chiba-stations.geojson` — 駅（Point、`name` / `lines` / `isJr` / `isPrivate` / `major`）
-- 区間・本数は手編集の単一ソース `data/chiba-lines.csv`（列: `路線,区間,本数,駅`）から生成
+  - `public/data/railways.geojson` — 路線（MultiLineString、`line` / `category` / `color` / `trains`）
+  - `public/data/stations.geojson` — 駅（Point、`name` / `lines` / `isJr` / `isPrivate` / `major`）
+- 区間・本数は手編集の単一ソース `data/lines.csv`（列: `路線,区間,本数,駅`）から生成
 - **出典表示は必須**（地図 attribution に表示済み）
 
 > 詳細なデータ生成手順・地図レイヤー構成は [CLAUDE.md](CLAUDE.md) を参照。
@@ -88,7 +88,9 @@ npx wrangler deploy             # 公開
 - [x] 複数事業者（JR / 私鉄・三セク）・乗換駅を描画する
 - [x] JR / 私鉄 の表示切替
 - [x] 区間ごとの本数表示（CSV ベース）
-- [ ] 駅クリックで情報を表示する
-- [ ] 対象範囲の拡大（千葉県以外）
+- [x] 駅クリックで情報を表示する
+- [x] 対象範囲の拡大（南関東一都三県＝埼玉・千葉・東京・神奈川）
+- [x] 全路線への各社公式ベースのラインカラー付与
+- [ ] 千葉以外の路線の区間分割・本数の整備（現状は既定本数）
 - [ ] バックエンド（Workers / D1）の導入
 - [ ] 自宅 Docker 環境での動作対応

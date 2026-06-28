@@ -32,11 +32,11 @@ export const WHITE_MAP_STYLE: StyleSpecification = {
   ],
 }
 
-/** 初期表示（千葉県全体が収まる位置）。 */
+/** 初期表示（南関東一都三県＝埼玉・千葉・東京・神奈川の本土が収まる位置）。 */
 export const INITIAL_VIEW_STATE = {
-  longitude: 140.2,
-  latitude: 35.5,
-  zoom: 8.6,
+  longitude: 139.75,
+  latitude: 35.65,
+  zoom: 8.2,
 }
 
 /** 白地図タイルの最大ズーム（14）。overzoom で 16 まで拡大表示を許容する。 */

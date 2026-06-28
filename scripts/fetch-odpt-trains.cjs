@@ -1,7 +1,7 @@
 /**
- * data/chiba-lines.csv の「本数」列を ODPT（公共交通オープンデータ）で更新するスクリプト。
+ * data/lines.csv の「本数」列を ODPT（公共交通オープンデータ）で更新するスクリプト。
  *
- * 本数の単一ソースは data/chiba-lines.csv（手入力）。このスクリプトは、ODPT で
+ * 本数の単一ソースは data/lines.csv（手入力）。このスクリプトは、ODPT で
  * 取得できた路線・区間だけ本数を実数で上書きし、それ以外の手入力値は保持する。
  *
  * データ源: ODPT の odpt:TrainTimetable（ https://www.odpt.org/ 無料・要APIキー）
@@ -159,7 +159,7 @@ async function main() {
   }
   if (updated > 0) {
     writeRows(rows)
-    console.log(`\nCSV を更新（${updated} 件）: data/chiba-lines.csv`)
+    console.log(`\nCSV を更新（${updated} 件）: data/lines.csv`)
   } else {
     console.log('\n更新対象なし（CSV は変更なし）。')
   }

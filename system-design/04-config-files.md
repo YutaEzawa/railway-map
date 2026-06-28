@@ -2,7 +2,7 @@
 
 プログラミング不要で挙動を調整できるファイルの一覧。編集後の反映方法も記載。
 
-## 1. `data/chiba-lines.csv` — 区間・本数・駅
+## 1. `data/lines.csv` — 区間・本数・駅
 
 路線ごとの区間と本数（線の太さの元）を定義する単一ソース。列は `路線,区間,本数,駅`。
 
@@ -20,7 +20,7 @@
   小湊鐵道線,小湊線(五井〜上総牛久),40,五井 上総村上 海士有木 上総三又 上総山田 光風台 馬立 上総牛久
   小湊鐵道線,小湊線(上総牛久〜上総中野),12,上総川間 上総鶴舞 上総久保 高滝 里見 飯給 月崎 上総大久保 養老渓谷 上総中野
   ```
-- 反映: `node scripts/build-chiba-jr.cjs` → GeoJSON 再生成 → 開発サーバーが反映。
+- 反映: `node scripts/build-railways.cjs` → GeoJSON 再生成 → 開発サーバーが反映。
 
 ## 2. `data/line-style.json` — 線の太さ・線種の境界値
 
@@ -51,7 +51,7 @@
 
 ## 4. スクリプト内の定数（要コード編集）
 
-非プログラマ向けではないが、変更頻度のために記載。すべて `scripts/build-chiba-jr.cjs` 先頭付近。
+非プログラマ向けではないが、変更頻度のために記載。すべて `scripts/build-railways.cjs` 先頭付近。
 
 | 定数 | 説明 |
 |---|---|
@@ -59,7 +59,7 @@
 | `LINE_NAME_OVERRIDES` | N02 の曖昧な路線名 → 表示名 |
 | `MAJOR_STATIONS` | 主要駅（ラベル対象）に追加する駅 |
 | `SERVICE_LINES` | 複々線の並走サービス（各停/快速）の色・左右 |
-| `JR_OPERATOR` / `CHIBA_ID` | JR 判定・対象都道府県 |
+| `JR_OPERATOR` / `TARGET_PREF_IDS` | JR 判定・対象都県（id 配列） |
 
 ラベル表示ズーム（`LABEL_ZOOM`）は `src/map/MapView.tsx` で定義。
 
@@ -69,6 +69,6 @@
 npm run dev       # 開発サーバー（保存で自動リロード）
 npm run build     # tsc 型チェック + vite build（dist/）
 npm run lint      # oxlint
-node scripts/build-chiba-jr.cjs        # GeoJSON 再生成（CSV/区間を変えたとき）
+node scripts/build-railways.cjs        # GeoJSON 再生成（CSV/区間を変えたとき）
 node scripts/fetch-odpt-trains.cjs     # ODPT から本数取得→CSV更新（任意, 要 .env）
 ```
