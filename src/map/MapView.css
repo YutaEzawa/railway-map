@@ -33,6 +33,24 @@
   color: #1a1a1a;
 }
 
+/* クリック時のポップアップ内容。 */
+.map-view__popup {
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: #222222;
+  line-height: 1.5;
+}
+
+.map-view__popup-title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.map-view__popup-row {
+  color: #444444;
+}
+
 /* 表示切替＋凡例パネル（右上に重ねる）。詳細を開くと縦に伸びるのでスクロール可。 */
 .map-view__panel {
   position: absolute;

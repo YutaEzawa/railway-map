@@ -5,8 +5,10 @@ import {
   Source,
   Layer,
   Marker,
+  Popup,
   type LineLayerSpecification,
   type CircleLayerSpecification,
+  type MapLayerMouseEvent,
 } from 'react-map-gl/maplibre'
 import type { FilterSpecification, ExpressionSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -122,6 +124,20 @@ const lineDashedLayer: LineLayerSpecification = {
   },
 }
 
+/** クリック判定用の透明な太線（見た目は変えずクリック領域だけ広げる）。 */
+const lineHitLayer: LineLayerSpecification = {
+  id: 'route-lines-hit',
+  type: 'line',
+  source: 'railways',
+  layout: { 'line-join': 'round', 'line-cap': 'round' },
+  paint: {
+    'line-color': '#000000',
+    'line-opacity': 0,
+    'line-width': ['interpolate', ['linear'], ['zoom'], 8, 6, 12, 12, 16, 18],
+    'line-offset': LINE_OFFSET,
+  },
+}
+
 /** 駅ドット（全駅）。主要駅は一回り大きく。 */
 const stationLayer: CircleLayerSpecification = {
   id: 'stations',
@@ -148,6 +164,14 @@ function useGeoJSON<T>(url: string) {
   })
 }
 
+/** クリックで表示するポップアップ情報。 */
+type PopupInfo =
+  | { kind: 'station'; lng: number; lat: number; name: string; lines: string[] }
+  | { kind: 'line'; lng: number; lat: number; line: string; section?: string; trains: number; category: Category }
+
+/** クリック判定の対象レイヤー（駅ドットと、路線用の透明な太線）。 */
+const CLICK_LAYERS = ['stations', 'route-lines-hit']
+
 /**
  * 国土地理院の白地図タイル上に、千葉県内の鉄道（JR＋私鉄）の全路線・全駅を重ねて表示する。
  * 路線・駅データは public/data の GeoJSON（国土数値情報 N02 由来）を読み込む。
@@ -160,6 +184,33 @@ export default function MapView() {
   const [showJR, setShowJR] = useState(true)
   const [showPrivate, setShowPrivate] = useState(true)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [popup, setPopup] = useState<PopupInfo | null>(null)
+  const [cursor, setCursor] = useState('')
+
+  // 路線・駅をクリックしたらポップアップ情報を組み立てる。
+  const handleClick = (e: MapLayerMouseEvent) => {
+    const feats = e.features ?? []
+    const station = feats.find((f) => f.layer.id === 'stations')
+    if (station) {
+      const [lng, lat] = (station.geometry as Point).coordinates
+      let lines = station.properties?.lines
+      if (typeof lines === 'string') {
+        try { lines = JSON.parse(lines) } catch { lines = [] }
+      }
+      setPopup({ kind: 'station', lng, lat, name: station.properties?.name, lines: lines ?? [] })
+      return
+    }
+    const line = feats.find((f) => f.layer.id === 'route-lines-hit')
+    if (line) {
+      const p = line.properties ?? {}
+      setPopup({
+        kind: 'line', lng: e.lngLat.lng, lat: e.lngLat.lat,
+        line: p.line, section: p.section, trains: p.trains, category: p.category,
+      })
+      return
+    }
+    setPopup(null)
+  }
 
   // 現在ズーム（整数に丸める）。閾値判定は整数比較で十分なので再描画を抑えられる。
   const [zoom, setZoom] = useState(Math.floor(INITIAL_VIEW_STATE.zoom))
@@ -283,6 +334,11 @@ export default function MapView() {
         mapStyle={WHITE_MAP_STYLE}
         maxZoom={MAX_ZOOM}
         attributionControl={{ customAttribution: STATION_DATA_ATTRIBUTION }}
+        interactiveLayerIds={CLICK_LAYERS}
+        cursor={cursor}
+        onClick={handleClick}
+        onMouseEnter={() => setCursor('pointer')}
+        onMouseLeave={() => setCursor('')}
         onZoom={(e) => {
           const z = Math.floor(e.viewState.zoom)
           setZoom((prev) => (prev === z ? prev : z))
@@ -293,6 +349,7 @@ export default function MapView() {
             <Layer {...lineCasingLayer} filter={solidFilter} />
             <Layer {...lineLayer} filter={solidFilter} />
             <Layer {...lineDashedLayer} filter={dashedFilter} />
+            <Layer {...lineHitLayer} filter={lineFilter} />
           </Source>
         )}
 
@@ -320,6 +377,39 @@ export default function MapView() {
             </span>
           </Marker>
         ))}
+
+        {popup && (
+          <Popup
+            longitude={popup.lng}
+            latitude={popup.lat}
+            anchor="bottom"
+            offset={12}
+            closeOnClick={false}
+            onClose={() => setPopup(null)}
+          >
+            {popup.kind === 'station' ? (
+              <div className="map-view__popup">
+                <div className="map-view__popup-title">{popup.name}</div>
+                <div className="map-view__popup-row">
+                  {popup.lines.length ? popup.lines.join(' / ') : '駅'}
+                </div>
+              </div>
+            ) : (
+              <div className="map-view__popup">
+                <div className="map-view__popup-title">{popup.line}</div>
+                {popup.section && (
+                  <div className="map-view__popup-row">区間: {popup.section}</div>
+                )}
+                <div className="map-view__popup-row">
+                  平日・片方向 約 {popup.trains} 本
+                </div>
+                <div className="map-view__popup-row">
+                  {popup.category === 'jr' ? 'JR' : '私鉄'}
+                </div>
+              </div>
+            )}
+          </Popup>
+        )}
       </Map>
     </div>
   )
