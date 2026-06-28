@@ -17,6 +17,7 @@ import {
   STATION_DATA_ATTRIBUTION,
   WHITE_MAP_STYLE,
 } from './config'
+import { LINE_STYLE, type WidthStops } from './lineStyle'
 import './MapView.css'
 
 type Category = 'jr' | 'private'
@@ -40,15 +41,35 @@ type StationsData = FeatureCollection<Point, StationProps>
 const RAILWAYS_URL = `${import.meta.env.BASE_URL}data/chiba-railways.geojson`
 const STATIONS_URL = `${import.meta.env.BASE_URL}data/chiba-stations.geojson`
 
-/** 本数（平日・片方向）の想定レンジ。線の太さ係数（少→細, 多→太）に対応づける。 */
-const TRAINS_MIN = 15
-const TRAINS_MAX = 230
-/** 本数に応じた太さ係数の式。 */
-const trainsFactor: ExpressionSpecification = [
-  'interpolate', ['linear'], ['get', 'trains'],
-  TRAINS_MIN, 0.55,
-  TRAINS_MAX, 1.7,
-]
+// 線種の境界値・太さは lineStyle.ts（別ファイル）で定義。
+const { thresholds: TH, line: LINE_W, casing: CASING_W, dashed: DASHED } = LINE_STYLE
+const DASH_BELOW = TH.dashBelow
+
+/** 実線の太さ式（ズーム interpolate × 本数 step で 細/普通/太）。 */
+function solidWidth(stops: WidthStops): ExpressionSpecification {
+  const expr: unknown[] = ['interpolate', ['linear'], ['zoom']]
+  for (const s of stops) {
+    expr.push(s.zoom, ['step', ['get', 'trains'], s.tiers[0], TH.normal, s.tiers[1], TH.thick, s.tiers[2]])
+  }
+  return expr as ExpressionSpecification
+}
+
+/** 点線の太さ式（ズーム interpolate のみ）。 */
+function dashedWidth(): ExpressionSpecification {
+  const expr: unknown[] = ['interpolate', ['linear'], ['zoom']]
+  for (const s of DASHED.width) expr.push(s.zoom, s.w)
+  return expr as ExpressionSpecification
+}
+
+/** 並走オフセット式。offset プロパティ(±1, 既定0)×ズーム別px。複々線の各停/快速用。 */
+function offsetExpr(): ExpressionSpecification {
+  const expr: unknown[] = ['interpolate', ['linear'], ['zoom']]
+  for (const s of LINE_STYLE.parallelOffset) {
+    expr.push(s.zoom, ['*', ['coalesce', ['get', 'offset'], 0], s.px])
+  }
+  return expr as ExpressionSpecification
+}
+const LINE_OFFSET = offsetExpr()
 
 /** 駅名ラベルを表示し始めるズーム（カテゴリ × 主要/全駅ごと）。 */
 const LABEL_ZOOM = {
@@ -61,7 +82,7 @@ const LABEL_ZOOM = {
 /** 何も表示しないフィルタ。 */
 const HIDE_ALL: FilterSpecification = ['==', ['literal', 1], 0]
 
-/** 路線ラインの下に敷く暗いケーシング。白地図上で路線色を見やすくする。 */
+/** 路線ライン（実線）の下に敷く暗いケーシング。細/普通/太の3段階。 */
 const lineCasingLayer: LineLayerSpecification = {
   id: 'route-lines-casing',
   type: 'line',
@@ -69,18 +90,12 @@ const lineCasingLayer: LineLayerSpecification = {
   layout: { 'line-join': 'round', 'line-cap': 'round' },
   paint: {
     'line-color': '#555555',
-    // ズームを最上位の interpolate にし、各段の値に本数係数を掛ける
-    // （['zoom'] は他の式の中に入れられないため）。
-    'line-width': [
-      'interpolate', ['linear'], ['zoom'],
-      8, ['*', 3.5, trainsFactor],
-      12, ['*', 6, trainsFactor],
-      16, ['*', 9, trainsFactor],
-    ],
+    'line-width': solidWidth(CASING_W),
+    'line-offset': LINE_OFFSET,
   },
 }
 
-/** 路線ライン。色は feature の color プロパティを参照。 */
+/** 路線ライン（実線）。本数で 細/普通/太 の3段階。色は color プロパティ。 */
 const lineLayer: LineLayerSpecification = {
   id: 'route-lines',
   type: 'line',
@@ -88,12 +103,22 @@ const lineLayer: LineLayerSpecification = {
   layout: { 'line-join': 'round', 'line-cap': 'round' },
   paint: {
     'line-color': ['get', 'color'],
-    'line-width': [
-      'interpolate', ['linear'], ['zoom'],
-      8, ['*', 1.8, trainsFactor],
-      12, ['*', 4, trainsFactor],
-      16, ['*', 7, trainsFactor],
-    ],
+    'line-width': solidWidth(LINE_W),
+    'line-offset': LINE_OFFSET,
+  },
+}
+
+/** 本数が少ない路線（点線）。line-dasharray はデータ式不可のため専用レイヤー。 */
+const lineDashedLayer: LineLayerSpecification = {
+  id: 'route-lines-dashed',
+  type: 'line',
+  source: 'railways',
+  layout: { 'line-join': 'round', 'line-cap': 'butt' },
+  paint: {
+    'line-color': ['get', 'color'],
+    'line-dasharray': DASHED.dasharray,
+    'line-width': dashedWidth(),
+    'line-offset': LINE_OFFSET,
   },
 }
 
@@ -165,6 +190,16 @@ export default function MapView() {
     if (cats.length === 0) return HIDE_ALL
     return ['match', ['get', 'category'], cats, true, false]
   }, [showJR, showPrivate])
+
+  // 実線（本数 >= DASH_BELOW）と点線（< DASH_BELOW）でレイヤーを分ける。
+  const solidFilter = useMemo<FilterSpecification>(
+    () => ['all', lineFilter, ['>=', ['get', 'trains'], DASH_BELOW]] as FilterSpecification,
+    [lineFilter],
+  )
+  const dashedFilter = useMemo<FilterSpecification>(
+    () => ['all', lineFilter, ['<', ['get', 'trains'], DASH_BELOW]] as FilterSpecification,
+    [lineFilter],
+  )
 
   // 駅レイヤー用フィルタ（JR 駅 or 私鉄 駅。乗換駅は両方）。
   const stationFilter = useMemo<FilterSpecification>(() => {
@@ -255,8 +290,9 @@ export default function MapView() {
       >
         {railways.data && (
           <Source id="railways" type="geojson" data={railways.data}>
-            <Layer {...lineCasingLayer} filter={lineFilter} />
-            <Layer {...lineLayer} filter={lineFilter} />
+            <Layer {...lineCasingLayer} filter={solidFilter} />
+            <Layer {...lineLayer} filter={solidFilter} />
+            <Layer {...lineDashedLayer} filter={dashedFilter} />
           </Source>
         )}
 

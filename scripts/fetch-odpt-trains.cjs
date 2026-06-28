@@ -7,8 +7,11 @@
  * データ源: ODPT の odpt:TrainTimetable（ https://www.odpt.org/ 無料・要APIキー）
  *
  * 使い方:
- *   ODPT_TOKEN=<本体APIキー> [ODPT_CHALLENGE_TOKEN=<チャレンジAPIキー>] \
- *     node scripts/fetch-odpt-trains.cjs
+ *   - リポジトリ直下の .env に ODPT_TOKEN / ODPT_CHALLENGE_TOKEN を記入して
+ *     `node scripts/fetch-odpt-trains.cjs`（.env は .env.example を参照）。
+ *   - もしくはインラインで:
+ *     ODPT_TOKEN=<本体APIキー> [ODPT_CHALLENGE_TOKEN=<チャレンジAPIキー>] \
+ *       node scripts/fetch-odpt-trains.cjs
  *   - JR東日本はチャレンジ系（api-challenge2024.odpt.org）。現状キー取得保留のため
  *     ODPT_CHALLENGE_TOKEN 未設定なら JR はスキップ（CSV の手入力値のまま）。
  *   - 東京メトロ/都営/つくばEX 等は本体（api.odpt.org）。
@@ -18,6 +21,7 @@
  *       ÷2（四捨五入）で片方向換算。ODPT_RAILWAY_TO_LINE で CSV のキー
  *       （区間ラベル or 路線名）へ対応づけて合算する。
  */
+require('./load-env.cjs')
 const { readRows, writeRows, trainKey } = require('./lines-csv.cjs')
 
 const WEEKDAY = 'odpt.Calendar:Weekday'

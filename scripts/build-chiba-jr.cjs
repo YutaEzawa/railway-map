@@ -17,6 +17,7 @@
  *   - public/data/chiba-railways.geojson  路線（路線ごとの MultiLineString、category=jr|private）
  *   - public/data/chiba-stations.geojson  駅（Point。isJr/isPrivate/major）
  */
+require('./load-env.cjs')
 const fs = require('fs')
 const path = require('path')
 const { readRows, toSections, toTrains } = require('./lines-csv.cjs')
@@ -36,6 +37,32 @@ const DEFAULT_TRAINS = 30
 const CSV_ROWS = readRows()
 const LINE_SECTIONS = toSections(CSV_ROWS) // { 路線名: [{label, stations}] }
 const TRAINS = toTrains(CSV_ROWS) // { 区間 or 路線: 本数 }
+
+/**
+ * 複々線で各駅停車・快速を並べて表示する路線（並走サービス）。
+ * N02 の 1 本の路線ジオメトリを、サービスごとに line-offset でずらして 2 本描く。
+ * 対象区間（駅集合）と各サービスの本数は CSV の各サービス行（路線名＝サービス名）から取る。
+ * baseN02: 元の N02 路線名（displayName）。offset: 並走の左右（+/-1）。
+ */
+const SERVICE_LINES = {
+  総武線: [
+    { name: '総武線各駅停車', color: '#FFD400', offset: 1 },
+    { name: '総武線快速', color: '#0072BC', offset: -1 },
+  ],
+  常磐線: [
+    { name: '常磐線各駅停車', color: '#00B261', offset: 1 },
+    { name: '常磐線快速', color: '#1FA8E0', offset: -1 },
+  ],
+}
+// 並走対象区間の駅集合（baseN02 -> Set(駅名)）。各サービス行の駅の和集合。
+const SERVICE_STATION_SET = {}
+for (const [base, services] of Object.entries(SERVICE_LINES)) {
+  const set = (SERVICE_STATION_SET[base] = new Set())
+  for (const sv of services) {
+    const row = CSV_ROWS.find((r) => r.line === sv.name)
+    if (row) for (const st of row.stations) set.add(st)
+  }
+}
 
 /**
  * 私鉄の路線表示名の補正（事業者名|N02路線名 → 表示名）。
@@ -172,6 +199,11 @@ function displayLineName(operator, rawName) {
   return LINE_NAME_OVERRIDES[`${operator}|${rawName}`] || rawName
 }
 
+/** セグメントの座標を西→東（経度が増える向き）に揃える。 */
+function orientWestEast(coords) {
+  return coords[0][0] <= coords[coords.length - 1][0] ? coords : coords.slice().reverse()
+}
+
 function main() {
   const japan = load(JAPAN_GEOJSON)
   const inChiba = buildChibaTest(japan)
@@ -184,52 +216,71 @@ function main() {
     const m = (stationToSection[line] = {})
     for (const s of secs) for (const name of s.stations) m[name] = s.label
   }
-  // 区間割り当て用に、JR 路線ごとの駅座標を集める。
-  const jrLineStations = {} // 路線名 -> [{ name, x, y }]
+  // 区間割り当て用に、区間定義のある路線（事業者問わず）の駅座標を集める。
+  const lineStations = {} // 表示路線名 -> [{ name, x, y }]
   for (const f of st.features) {
-    if (f.properties.N02_004 !== JR_OPERATOR) continue
-    const ln = f.properties.N02_003
-    if (!LINE_SECTIONS[ln]) continue
+    const ln = displayLineName(f.properties.N02_004, f.properties.N02_003)
+    if (!LINE_SECTIONS[ln] && !SERVICE_LINES[ln]) continue
     const [cx, cy] = centroid(f.geometry.coordinates)
     if (!inChiba(cx, cy)) continue
-    ;(jrLineStations[ln] = jrLineStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy })
+    ;(lineStations[ln] = lineStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy })
   }
-  // 点に最も近い駅の区間ラベルを返す。
-  const sectionOf = (line, x, y) => {
+  // 点に最も近い駅名を返す。
+  const nearestStation = (line, x, y) => {
     let best = null, bestD = Infinity
-    for (const s of jrLineStations[line] || []) {
+    for (const s of lineStations[line] || []) {
       const d = (s.x - x) ** 2 + (s.y - y) ** 2
       if (d < bestD) { bestD = d; best = s.name }
     }
-    return (best && stationToSection[line][best]) || LINE_SECTIONS[line][0].label
+    return best
+  }
+  const sectionOf = (line, x, y) =>
+    (stationToSection[line][nearestStation(line, x, y)] || '') || LINE_SECTIONS[line][0].label
+  // セグメントが並走サービス区間（複々線）に入っているか。
+  // 両端の最寄り駅がともに区間内のときだけ並走にする（境界の外側へはみ出さない）。
+  const inServiceZone = (line, coords) => {
+    const set = SERVICE_STATION_SET[line]
+    if (!set) return false
+    const a = coords[0]
+    const b = coords[coords.length - 1]
+    const na = nearestStation(line, a[0], a[1])
+    const nb = nearestStation(line, b[0], b[1])
+    return !!na && !!nb && set.has(na) && set.has(nb)
   }
 
-  // --- 路線: Chiba 内のセグメントを「区間ラベル（区間定義あり）」または
-  //     「表示路線名（区間定義なし）」ごとに MultiLineString へまとめる ---
-  const lines = {} // キー -> { coords:[], category, line(親), section? }
+  // --- 路線: Chiba 内のセグメントを出力先（区間ラベル / 並走サービス / 路線名）へ
+  //     振り分けて MultiLineString へまとめる。並走サービスは 1 セグメントを複数出力 ---
+  const lines = {} // キー -> { coords, category, line, color, section?, offset? }
   for (const f of rs.features) {
     const [mx, my] = midPoint(f.geometry.coordinates)
     if (!inChiba(mx, my)) continue
     const op = f.properties.N02_004
     const name = displayLineName(op, f.properties.N02_003)
     const category = op === JR_OPERATOR ? 'jr' : 'private'
-    let key = name, section
-    if (op === JR_OPERATOR && LINE_SECTIONS[name]) {
-      section = sectionOf(name, mx, my)
-      key = section
+
+    let outs
+    if (SERVICE_LINES[name] && inServiceZone(name, f.geometry.coordinates)) {
+      outs = SERVICE_LINES[name].map((sv) => ({ key: sv.name, line: sv.name, color: sv.color, offset: sv.offset }))
+    } else if (LINE_SECTIONS[name]) {
+      const section = sectionOf(name, mx, my)
+      outs = [{ key: section, line: name, color: LINE_COLORS[name] || DEFAULT_COLOR, section }]
+    } else {
+      outs = [{ key: name, line: name, color: LINE_COLORS[name] || DEFAULT_COLOR }]
     }
-    const e = (lines[key] = lines[key] || { coords: [], category, line: name, section })
-    e.coords.push(f.geometry.coordinates)
+    for (const o of outs) {
+      const e = (lines[o.key] =
+        lines[o.key] || { coords: [], category, line: o.line, color: o.color, section: o.section, offset: o.offset })
+      // 並走サービスは line-offset の左右が描画方向で決まるため、
+      // 全セグメントを西→東に揃えて各停/快速の側が反転しないようにする。
+      const coords = o.offset ? orientWestEast(f.geometry.coordinates) : f.geometry.coordinates
+      e.coords.push(coords)
+    }
   }
   const railwayFeatures = Object.keys(lines).map((key) => {
     const e = lines[key]
-    const props = {
-      line: e.line,
-      category: e.category,
-      color: LINE_COLORS[e.line] || DEFAULT_COLOR,
-      trains: TRAINS[key] ?? DEFAULT_TRAINS,
-    }
+    const props = { line: e.line, category: e.category, color: e.color, trains: TRAINS[key] ?? DEFAULT_TRAINS }
     if (e.section) props.section = e.section
+    if (e.offset) props.offset = e.offset
     return { type: 'Feature', properties: props, geometry: { type: 'MultiLineString', coordinates: e.coords } }
   })
   // 並びを JR → 私鉄、路線名、区間 にする。

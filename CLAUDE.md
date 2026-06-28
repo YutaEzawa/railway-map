@@ -26,8 +26,9 @@ npm run preview   # preview the production build locally
   - `public/data/chiba-railways.geojson` — 路線（MultiLineString、`line`/`category`/`color`/`trains`、区間分割時は `section`）
   - `public/data/chiba-stations.geojson` — 駅（Point、`name`/`lines`/`isJr`/`isPrivate`/`major`）。`major`=乗換駅 or 主要ターミナル。
 - **区間と本数は `data/chiba-lines.csv`（手編集の単一ソース）から読み込む**（`scripts/lines-csv.cjs` 経由）。CSV 列は `路線,区間,本数,駅`。
-  - 本数が区間で異なる JR 路線（総武・内房・外房・成田）は区間行に分割し、`駅`（半角スペース区切り）の集合で地図セグメントを区間へ割り当てる。`本数`=平日・片方向。
-  - 区間分けしない路線・私鉄は `区間`/`駅` を空にし、路線名＋本数のみ。
+  - `駅`（半角スペース区切り）は**全路線で全駅を記載**してある。区間に分けたい路線は、1 行を複数行に分けて各行に `区間` 名と駅の部分集合を書けばよい（事業者問わず分割可）。`本数`=平日・片方向。
+  - `区間` が空の行は路線全体を 1 本で描画（`本数` のみ使用、`駅` は将来の分割用）。`区間` を付けた行は `駅` 集合で地図セグメントをその区間へ割り当てる（中点に最も近い駅の区間）。
+  - 現在は総武・内房・外房・成田を区間分割済み。
 - 入力の N02・県境データはリポジトリに含めず（`.data/` は gitignore）、**生成 GeoJSON と CSV をコミット**する。路線表示名・カラー・主要駅リストは `build-chiba-jr.cjs` 先頭の定数（`LINE_NAME_OVERRIDES` / `LINE_COLORS` / `MAJOR_STATIONS`）。
 - 再生成: `.data/` に入力を置いて `node scripts/build-chiba-jr.cjs`（入力パスは環境変数 `N02_DIR` / `JAPAN_GEOJSON` でも指定可）。
 - 本数の自動更新（任意）: `scripts/fetch-odpt-trains.cjs` が ODPT API から平日本数を取得し、CSV の `本数` 列を上書き（取得できた区間のみ。手入力値は保持）。要 ODPT APIキー。

@@ -15,6 +15,9 @@ dist-ssr
 # build-chiba-jr.cjs の入力（国土数値情報 N02・県境 GeoJSON）。生成物のみコミットする。
 .data
 
+# スクリプト用の環境変数（ODPT キー等）。.env.example はコミットする。
+.env
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
