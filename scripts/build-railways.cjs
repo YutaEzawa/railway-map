@@ -51,7 +51,8 @@ const TRAINS = toTrains(CSV_ROWS) // { 区間 or 路線: 本数 }
  */
 const SERVICE_LINES = {
   総武線: [
-    { name: '総武線各駅停車', color: '#FFD400', offset: 1 },
+    // 緩行は三鷹〜千葉まで通しで「中央・総武線各駅停車」（offset は中央線と揃えて +1）。
+    { name: '中央・総武線各駅停車', color: '#FFD400', offset: 1 },
     { name: '総武線快速', color: '#0072BC', offset: -1 },
   ],
   常磐線: [
@@ -67,6 +68,131 @@ for (const [base, services] of Object.entries(SERVICE_LINES)) {
     const row = CSV_ROWS.find((r) => r.line === sv.name)
     if (row) for (const st of row.stations) set.add(st)
   }
+}
+
+/**
+ * 系統が重なる JR 幹線（東北線・東海道線・中央線）を「通称」ごとに描き分ける定義。
+ * N02 は 1 つの物理路線名に複数系統（京浜東北/宇都宮、京浜東北/東海道、快速/各停 等）を
+ * 収録しているため、駅集合で「ゾーン」に分け、各ゾーンで該当する通称サービスを引く。
+ * 同一ゾーンに複数サービスがある区間（共用複々線）は line-offset で並べて描く。
+ * ゾーン判定はセグメント中点の最寄り駅（そのゾーンの駅集合内）で行う。
+ * 本数はサービス名で CSV からひく（無ければ既定）。色はここで指定。
+ */
+const CORRIDORS = {
+  東北線: [
+    {
+      // 東京〜大宮: 京浜東北線と宇都宮線（東北本線中距離）が共用する主線。
+      label: '東北本線(東京〜大宮)',
+      services: [
+        { name: '京浜東北線', color: '#00BAE8', offset: 1 },
+        { name: '宇都宮線', color: '#F68B1E', offset: -1 },
+      ],
+      stations: '東京 神田 秋葉原 御徒町 上野 鶯谷 日暮里 西日暮里 田端 上中里 王子 東十条 尾久 赤羽 川口 西川口 蕨 南浦和 浦和 北浦和 与野 さいたま新都心 大宮'.split(' '),
+    },
+    {
+      // 大宮以北: 宇都宮線（中距離）単独。
+      label: '宇都宮線(大宮〜栗橋)',
+      services: [{ name: '宇都宮線', color: '#F68B1E', offset: 0 }],
+      stations: '土呂 東大宮 蓮田 白岡 新白岡 久喜 東鷲宮 栗橋'.split(' '),
+    },
+    {
+      // 赤羽〜大宮の別線（武蔵浦和経由）: 埼京線単独。主線と分岐するため branch。
+      label: '埼京線(赤羽〜大宮)',
+      branch: true,
+      services: [{ name: '埼京線', color: '#00AC9A', offset: 0 }],
+      stations: '浮間舟渡 北赤羽 戸田公園 戸田 北戸田 武蔵浦和 中浦和 南与野 与野本町 北与野'.split(' '),
+    },
+  ],
+  東海道線: [
+    {
+      // 東京〜横浜: 京浜東北線と東海道線（中距離）が共用。
+      label: '東海道本線(東京〜横浜)',
+      services: [
+        { name: '京浜東北線', color: '#00BAE8', offset: 1 },
+        { name: '東海道線', color: '#F68B1E', offset: -1 },
+      ],
+      stations: '有楽町 新橋 浜松町 田町 高輪ゲートウェイ 品川 大井町 大森 蒲田 川崎 鶴見 新子安 東神奈川'.split(' '),
+    },
+    {
+      // 横浜〜大船: 東海道線と横須賀線が並走（N02 は東海道線でまとめている区間）。
+      // 保土ヶ谷・東戸塚（横須賀の駅）もここに含め、両系統を並走描画する。
+      // 横須賀は offset 0（大船〜久里浜の単独区間と揃えて連続させる）、東海道を -1 にずらす。
+      label: '東海道・横須賀(横浜〜大船)',
+      services: [
+        { name: '東海道線', color: '#F68B1E', offset: -1 },
+        { name: '横須賀線', color: '#0072BC', offset: 0 },
+      ],
+      stations: '横浜 保土ヶ谷 東戸塚 戸塚 大船'.split(' '),
+    },
+    {
+      // 大船以西: 東海道線（中距離）単独。
+      label: '東海道線(大船〜熱海)',
+      services: [{ name: '東海道線', color: '#F68B1E', offset: 0 }],
+      stations: '藤沢 辻堂 茅ヶ崎 平塚 大磯 二宮 国府津 鴨宮 小田原 早川 根府川 真鶴 湯河原 熱海'.split(' '),
+    },
+    {
+      // 品鶴線（東京方の横須賀線・湘南新宿）: 横須賀線単独。主線（鶴見・川崎）の近くを
+      // 内陸で並走するため branch 指定（端点が品鶴駅の区間は主線へ流さない）。
+      // 保土ヶ谷・東戸塚は東海道と並走するため上の横浜〜大船ゾーン側に入れる。
+      label: '横須賀線(品鶴線)',
+      branch: true,
+      services: [{ name: '横須賀線', color: '#0072BC', offset: 0 }],
+      stations: '西大井 武蔵小杉 新川崎'.split(' '),
+    },
+    {
+      // 相鉄・JR直通線（東海道貨物線経由）。
+      label: '相鉄・JR直通線',
+      branch: true,
+      services: [{ name: '相鉄・JR直通線', color: '#6A1B7A', offset: 0 }],
+      stations: '羽沢横浜国大'.split(' '),
+    },
+  ],
+  中央線: [
+    {
+      // 御茶ノ水〜三鷹: 中央線快速と中央・総武線各駅停車の複々線。
+      label: '中央複々線(御茶ノ水〜三鷹)',
+      services: [
+        // 緩行は総武線側と側を揃える（緩行 +1 / 快速 -1）。
+        { name: '中央線快速', color: '#F15A22', offset: -1 },
+        { name: '中央・総武線各駅停車', color: '#FFD400', offset: 1 },
+      ],
+      stations: '御茶ノ水 水道橋 飯田橋 市ヶ谷 四ツ谷 信濃町 千駄ヶ谷 代々木 新宿 大久保 東中野 中野 高円寺 阿佐ヶ谷 荻窪 西荻窪 吉祥寺 三鷹'.split(' '),
+    },
+    {
+      // 東京〜御茶ノ水: 中央線快速単独。
+      label: '中央線快速(東京〜御茶ノ水)',
+      services: [{ name: '中央線快速', color: '#F15A22', offset: 0 }],
+      stations: '東京 神田'.split(' '),
+    },
+    {
+      // 三鷹〜高尾: 中央線快速単独。
+      label: '中央線快速(三鷹〜高尾)',
+      services: [{ name: '中央線快速', color: '#F15A22', offset: 0 }],
+      stations: '武蔵境 東小金井 武蔵小金井 国分寺 西国分寺 国立 立川 日野 豊田 八王子 西八王子 高尾 相模湖 藤野'.split(' '),
+    },
+  ],
+}
+// 駅名 → ゾーン index（CORRIDORS の各 base 内）。
+const CORRIDOR_ZONE = {} // base -> { 駅名: zoneIndex }
+for (const [base, zones] of Object.entries(CORRIDORS)) {
+  const m = (CORRIDOR_ZONE[base] = {})
+  zones.forEach((z, i) => z.stations.forEach((s) => (m[s] = i)))
+}
+
+/**
+ * 物理路線の一部区間を別サービス名で描き替える（CORRIDORS ほど複雑でない補完用）。
+ * 両端の最寄り駅がともに stations に含まれるセグメントだけ対象。本数はサービス名で CSV からひく。
+ * 総武線の緩行（御茶ノ水〜錦糸町）＝中央・総武線各駅停車、快速地下線（東京〜錦糸町）＝総武線快速。
+ * （錦糸町〜千葉の複々線は従来どおり SERVICE_LINES で描く。）
+ */
+const STATION_RELABEL = {
+  総武線: [
+    // 快速地下線（東京〜錦糸町）。新日本橋・馬喰町は快速線のみの駅なのでアンカー
+    // （片端がこれらに最寄りなら快速）。地下線は両国の真下を通り端点が両国にスナップ
+    // することがあるため、両端一致だけだと取りこぼす。
+    { line: '総武線快速', color: '#0072BC', anchors: new Set(['新日本橋', '馬喰町']), stations: new Set(['東京', '新日本橋', '馬喰町', '錦糸町']) },
+    { line: '中央・総武線各駅停車', color: '#FFD400', stations: new Set(['御茶ノ水', '秋葉原', '浅草橋', '両国', '錦糸町']) },
+  ],
 }
 
 /**
@@ -92,6 +218,8 @@ const LINE_NAME_OVERRIDES = {
   '京成電鉄|押上線': '京成押上線',
   '京成電鉄|金町線': '京成金町線',
   '首都圏新都市鉄道|常磐新線': 'つくばエクスプレス',
+  // 赤羽線（池袋〜赤羽）は埼京線の一部。通称へ統一（赤羽〜大宮別線は東北線 CORRIDORS で）。
+  '東日本旅客鉄道|赤羽線': '埼京線',
   // 在圏内で別事業者が同名になる路線の分離（統合されると別路線が 1 本になる）。
   '京浜急行電鉄|本線': '京急本線',
   '京浜急行電鉄|大師線': '京急大師線',
@@ -179,21 +307,25 @@ const LINE_COLORS = {
   // ===== 南関東への拡大で追加（各社公式のラインカラーをベースに） =====
   // JR 東日本（駅ナンバリングのラインカラー）
   山手線: '#9ACD32',
-  根岸線: '#00BAE8', // 京浜東北・根岸線
-  東北線: '#00BAE8', // 京浜東北線（東京〜大宮）
-  東海道線: '#F68B1E',
+  根岸線: '#00BAE8', // 京浜東北・根岸線（横浜〜大船。京浜東北は CORRIDORS で別途）
   高崎線: '#F68B1E',
-  中央線: '#F15A22', // 中央線快速
   青梅線: '#F15A22',
   五日市線: '#F15A22',
-  横須賀線: '#0072BC',
+  横須賀線: '#0072BC', // 大船〜久里浜（東京方の品鶴線は東海道線 CORRIDORS で別途）
   横浜線: '#80C342',
   南武線: '#FBD05D',
   鶴見線: '#FFD400',
   八高線: '#A8A39D',
   川越線: '#00AC9A', // 川越線・埼京線
-  赤羽線: '#00AC9A', // 埼京線（池袋〜赤羽）
+  埼京線: '#00AC9A', // 池袋〜赤羽（赤羽線をリネーム。赤羽〜大宮別線は東北線 CORRIDORS）
   相模線: '#009793',
+  // 東北線・東海道線・中央線は系統が重なるため CORRIDORS（後述）で通称別に描く
+  京浜東北線: '#00BAE8',
+  宇都宮線: '#F68B1E',
+  東海道線: '#F68B1E',
+  中央線快速: '#F15A22',
+  '中央・総武線各駅停車': '#FFD400',
+  '相鉄・JR直通線': '#6A1B7A',
   東北新幹線: '#2CA13A',
   上越新幹線: '#2CA13A',
   // JR 東海
@@ -373,9 +505,15 @@ function displayLineName(operator, rawName) {
   return LINE_NAME_OVERRIDES[`${operator}|${rawName}`] || rawName
 }
 
-/** セグメントの座標を西→東（経度が増える向き）に揃える。 */
-function orientWestEast(coords) {
-  return coords[0][0] <= coords[coords.length - 1][0] ? coords : coords.slice().reverse()
+/**
+ * 並走（line-offset）の左右が描画方向で決まるため、セグメントの向きを揃える。
+ * 主軸が東西なら西→東、南北なら南→北に統一（東北線のような南北路線にも対応）。
+ */
+function orientConsistent(coords) {
+  const a = coords[0], b = coords[coords.length - 1]
+  const dx = Math.abs(b[0] - a[0]), dy = Math.abs(b[1] - a[1])
+  if (dx >= dy) return a[0] <= b[0] ? coords : coords.slice().reverse()
+  return a[1] <= b[1] ? coords : coords.slice().reverse()
 }
 
 function main() {
@@ -391,13 +529,21 @@ function main() {
     for (const s of secs) for (const name of s.stations) m[name] = s.label
   }
   // 区間割り当て用に、区間定義のある路線（事業者問わず）の駅座標を集める。
+  // CORRIDORS の base 路線は、ゾーンに登録した駅のみ集めて zone も持たせる。
   const lineStations = {} // 表示路線名 -> [{ name, x, y }]
+  const corridorStations = {} // base -> [{ name, x, y, zone }]
   for (const f of st.features) {
     const ln = displayLineName(f.properties.N02_004, f.properties.N02_003)
-    if (!LINE_SECTIONS[ln] && !SERVICE_LINES[ln]) continue
     const [cx, cy] = centroid(f.geometry.coordinates)
     if (!inTarget(cx, cy)) continue
-    ;(lineStations[ln] = lineStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy })
+    if (LINE_SECTIONS[ln] || SERVICE_LINES[ln]) {
+      ;(lineStations[ln] = lineStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy })
+    }
+    if (CORRIDORS[ln]) {
+      const zone = CORRIDOR_ZONE[ln][f.properties.N02_005]
+      if (zone !== undefined)
+        ;(corridorStations[ln] = corridorStations[ln] || []).push({ name: f.properties.N02_005, x: cx, y: cy, zone })
+    }
   }
   // 点に最も近い駅名を返す。
   const nearestStation = (line, x, y) => {
@@ -407,6 +553,27 @@ function main() {
       if (d < bestD) { bestD = d; best = s.name }
     }
     return best
+  }
+  // CORRIDORS: 点の最寄りゾーン駅から、その通称ゾーン定義を返す（駅・点用）。
+  const corridorOf = (base, x, y) => {
+    let best = null, bestD = Infinity
+    for (const s of corridorStations[base] || []) {
+      const d = (s.x - x) ** 2 + (s.y - y) ** 2
+      if (d < bestD) { bestD = d; best = s.zone }
+    }
+    return CORRIDORS[base][best ?? 0]
+  }
+  // CORRIDORS（セグメント用）: 中点でゾーンを決めるが、端点が分岐線（品鶴・埼京・相鉄）
+  // の駅に接する区間は分岐ゾーンを優先する。分岐線は主線（鶴見・川崎・赤羽等）の近くを
+  // 通るため、中点だけだと主線ゾーン（京浜東北＋東海道 等）へ誤って吸われてしまう。
+  const corridorOfSegment = (base, coords) => {
+    const a = coords[0], b = coords[coords.length - 1]
+    for (const [x, y] of [a, b]) {
+      const z = corridorOf(base, x, y)
+      if (z.branch) return z
+    }
+    const [mx, my] = midPoint(coords)
+    return corridorOf(base, mx, my)
   }
   const sectionOf = (line, x, y) =>
     (stationToSection[line][nearestStation(line, x, y)] || '') || LINE_SECTIONS[line][0].label
@@ -444,27 +611,50 @@ function main() {
     const name = displayLineName(op, f.properties.N02_003)
     const category = op === JR_OPERATOR ? 'jr' : 'private'
 
-    let outs
-    if (SERVICE_LINES[name] && inServiceZone(name, f.geometry.coordinates)) {
-      outs = SERVICE_LINES[name].map((sv) => ({ key: sv.name, line: sv.name, color: sv.color, offset: sv.offset }))
+    // out: { line(表示名), trainKey(本数キー), color, offset, section? }
+    const coords = f.geometry.coordinates
+    let outs, relabel
+    if (CORRIDORS[name]) {
+      // 系統が重なる JR 幹線: セグメントの通称ゾーンの各サービスを引く（共用区間は offset で並走）。
+      const zone = corridorOfSegment(name, coords)
+      outs = zone.services.map((sv) => ({ line: sv.name, trainKey: sv.name, color: sv.color, offset: sv.offset }))
+    } else if (
+      STATION_RELABEL[name] &&
+      (relabel = (() => {
+        const a = nearestStation(name, coords[0][0], coords[0][1])
+        const b = nearestStation(name, coords[coords.length - 1][0], coords[coords.length - 1][1])
+        if (!a || !b) return null
+        return STATION_RELABEL[name].find(
+          (r) =>
+            (r.anchors && (r.anchors.has(a) || r.anchors.has(b))) ||
+            (r.stations.has(a) && r.stations.has(b)),
+        )
+      })())
+    ) {
+      outs = [{ line: relabel.line, trainKey: relabel.line, color: relabel.color }]
+    } else if (SERVICE_LINES[name] && inServiceZone(name, f.geometry.coordinates)) {
+      outs = SERVICE_LINES[name].map((sv) => ({ line: sv.name, trainKey: sv.name, color: sv.color, offset: sv.offset }))
     } else if (LINE_SECTIONS[name]) {
       const section = sectionOf(name, mx, my)
-      outs = [{ key: section, line: name, color: LINE_COLORS[name] || DEFAULT_COLOR, section }]
+      outs = [{ line: name, trainKey: section, color: LINE_COLORS[name] || DEFAULT_COLOR, section }]
     } else {
-      outs = [{ key: name, line: name, color: LINE_COLORS[name] || DEFAULT_COLOR }]
+      outs = [{ line: name, trainKey: name, color: LINE_COLORS[name] || DEFAULT_COLOR }]
     }
     for (const o of outs) {
-      const e = (lines[o.key] =
-        lines[o.key] || { coords: [], category, line: o.line, color: o.color, section: o.section, offset: o.offset })
+      // 同一サービスでも offset が違えば別フィーチャ（共用区間=offset / 単独区間=中央寄せ）。
+      // 凡例は line 名で重複排除されるので分割しても 1 項目に集約される。
+      const key = `${o.section || o.line}#${o.offset || 0}`
+      const e = (lines[key] =
+        lines[key] || { coords: [], category, line: o.line, color: o.color, section: o.section, offset: o.offset, trainKey: o.trainKey })
       // 並走サービスは line-offset の左右が描画方向で決まるため、
-      // 全セグメントを西→東に揃えて各停/快速の側が反転しないようにする。
-      const coords = o.offset ? orientWestEast(f.geometry.coordinates) : f.geometry.coordinates
+      // 全セグメントの向きを揃えて各停/快速等の側が反転しないようにする。
+      const coords = o.offset ? orientConsistent(f.geometry.coordinates) : f.geometry.coordinates
       e.coords.push(coords)
     }
   }
   const railwayFeatures = Object.keys(lines).map((key) => {
     const e = lines[key]
-    const props = { line: e.line, category: e.category, color: e.color, trains: TRAINS[key] ?? DEFAULT_TRAINS }
+    const props = { line: e.line, category: e.category, color: e.color, trains: TRAINS[e.trainKey] ?? DEFAULT_TRAINS }
     if (e.section) props.section = e.section
     if (e.offset) props.offset = e.offset
     return { type: 'Feature', properties: props, geometry: { type: 'MultiLineString', coordinates: e.coords } }
@@ -483,14 +673,28 @@ function main() {
   // ただし広域化すると同名・別location の駅（例: 栄町＝千葉モノレール/都電荒川線、
   // 永田＝外房線/秩父鉄道）が混ざるため、駅名の中で近接クラスタ単位に分けて
   // それぞれ 1 点にする（霞ヶ関のメトロ3線は同一駅、東武東上の霞ヶ関は別点、を満たす）。
+  // 駅の所属路線名も、地図と同じ通称へ寄せる（東北線→京浜東北線/宇都宮線、
+  // 東海道線の品鶴→横須賀線、総武線の御茶ノ水〜錦糸町→中央・総武各停 等）。
+  const reclassStationLines = (base, x, y, stName) => {
+    if (CORRIDORS[base]) return [...new Set(corridorOf(base, x, y).services.map((s) => s.name))]
+    const rel = STATION_RELABEL[base]
+    if (rel) {
+      const ls = [...new Set(rel.filter((r) => r.stations.has(stName)).map((r) => r.line))]
+      if (ls.length) return ls
+    }
+    return [base]
+  }
   const stationRecords = {} // 駅名 -> [{ x, y, line, jr }]
   for (const f of st.features) {
     const [cx, cy] = centroid(f.geometry.coordinates)
     if (!inTarget(cx, cy)) continue
     const op = f.properties.N02_004
-    ;(stationRecords[f.properties.N02_005] = stationRecords[f.properties.N02_005] || []).push({
-      x: cx, y: cy, line: displayLineName(op, f.properties.N02_003), jr: op === JR_OPERATOR,
-    })
+    const jr = op === JR_OPERATOR
+    const base = displayLineName(op, f.properties.N02_003)
+    const recs = (stationRecords[f.properties.N02_005] = stationRecords[f.properties.N02_005] || [])
+    for (const ln of reclassStationLines(base, cx, cy, f.properties.N02_005)) {
+      recs.push({ x: cx, y: cy, line: ln, jr })
+    }
   }
   // 同名の駅レコードを近接クラスタへ分割（単連結・貪欲法）。
   const clusterRecords = (recs) => {
