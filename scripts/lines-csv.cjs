@@ -15,7 +15,8 @@ const fs = require('fs')
 const path = require('path')
 
 const CSV_PATH = path.resolve(__dirname, '../data/lines.csv')
-const HEADER = '路線,区間,本数,駅'
+const HEADER = '路線,区間,本数,駅,状態'
+const HEADER_V1 = '路線,区間,本数,駅' // 旧フォーマット（後方互換）
 
 /** 本数のキー（区間優先）。 */
 function trainKey(row) {
@@ -28,15 +29,17 @@ function readRows(csvPath = CSV_PATH) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim() !== '')
   const rows = []
   for (const line of lines) {
-    if (line === HEADER) continue
+    if (line === HEADER || line === HEADER_V1) continue
     const parts = line.split(',')
     const [lineName = '', section = '', trains = ''] = parts
-    const stationsRaw = parts.slice(3).join(',') // 駅にカンマは無い前提
+    const stationsRaw = parts[3] || '' // 駅列（インデックス固定）
+    const status = parts[4] ? parts[4].trim() : ''
     rows.push({
       line: lineName.trim(),
       section: section.trim(),
       trains: trains.trim() === '' ? null : Number(trains.trim()),
       stations: stationsRaw.trim() === '' ? [] : stationsRaw.trim().split(/\s+/),
+      status,
     })
   }
   return rows
@@ -45,7 +48,7 @@ function readRows(csvPath = CSV_PATH) {
 /** 行配列を CSV 文字列にする（readRows と往復可能な形式）。 */
 function serialize(rows) {
   const body = rows.map((r) =>
-    [r.line, r.section, r.trains == null ? '' : String(r.trains), r.stations.join(' ')].join(','),
+    [r.line, r.section, r.trains == null ? '' : String(r.trains), r.stations.join(' '), r.status || ''].join(','),
   )
   return [HEADER, ...body].join('\n') + '\n'
 }
