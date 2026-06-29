@@ -75,6 +75,25 @@ const STATION_ID_OVERRIDES = {
 const SECTION_OVERRIDES = {
   // 方面ラベルに区間内の駅が出ない路線は toward で向き先を明示する。
   つくばエクスプレス: { toward: '秋葉原' },
+  // 小湊鐵道線の中間区間は Yahoo 方面ラベルが終着「上総中野」方面のみなので明示。
+  '小湊鐵道線(上総牛久〜里見)': { toward: '上総中野' },
+  '小湊鐵道線(里見〜養老渓谷)': { toward: '上総中野' },
+  // 内房線の中間区間: 各駅の実際の方面ラベルに合わせた toward を指定。
+  // 蘇我〜木更津: 蘇我は内房線の始発なので1方向のみ・自動解決（override不要）。
+  '内房線(木更津〜君津)': { toward: '君津' },        // 木更津の南行: 君津・上総一ノ宮
+  '内房線(君津〜上総湊)': { toward: '上総一ノ宮' },  // 君津の南行: 上総一ノ宮・館山
+  '内房線(上総湊〜館山)': { toward: '館山' },        // 上総湊の南行: 上総一ノ宮・館山
+  // 外房線の中間区間も同様。
+  '外房線(大網〜茂原)': { toward: '安房鴨川' },
+  '外房線(茂原〜上総一ノ宮)': { toward: '安房鴨川' },
+  '外房線(上総一ノ宮〜大原)': { toward: '安房鴨川' },
+  '外房線(大原〜勝浦)': { toward: '安房鴨川' },
+  // 総武本線の中間区間。
+  '総武本線(千葉〜佐倉)': { toward: '銚子' },
+  '総武本線(佐倉〜成東)': { toward: '銚子' },
+  // 中央・総武線各駅停車の中間区間（西行き方面ラベルに区間内駅が出ない）。
+  '中央・総武線各駅停車(錦糸町〜西船橋)': { toward: '千葉' },
+  '中央・総武線各駅停車(西船橋〜津田沼)': { toward: '千葉' },
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
@@ -173,17 +192,24 @@ async function getStationLines(stationId) {
   return out
 }
 
-/** 平日時刻表の発車本数（列車アンカーのユニーク数）を数える。 */
+/**
+ * 平日時刻表の発車本数を数える。同じ発車時刻（時:分）は 1 本として数える
+ * （臨時列車・連結列車などが同一時刻で重複掲載されるのを除くため）。
+ */
 async function countWeekday(stationId, lineCode) {
   const html = await fetchPath(
     `/timetable/${stationId}/${lineCode}?kind=${WEEKDAY_KIND}`,
     `tt_${stationId}_${lineCode}_k${WEEKDAY_KIND}`,
   )
-  const re = new RegExp(`/timetable/${stationId}/${lineCode}/(\\d+)\\?kind=${WEEKDAY_KIND}`, 'g')
-  const ids = new Set()
+  // 各列車リンク href の hh / mm（HTML エンティティ &amp; を考慮）を時分キーにして集約。
+  const re = new RegExp(
+    `/timetable/${stationId}/${lineCode}/\\d+\\?kind=${WEEKDAY_KIND}&(?:amp;)?hh=(\\d+)&(?:amp;)?mm=(\\d+)`,
+    'g',
+  )
+  const times = new Set()
   let m
-  while ((m = re.exec(html))) ids.add(m[1])
-  return ids.size
+  while ((m = re.exec(html))) times.add(`${m[1]}:${m[2]}`)
+  return times.size
 }
 
 /** CSV 行 → 取得対象（代表駅 ID・路線コード・方向ラベル）を解決。 */

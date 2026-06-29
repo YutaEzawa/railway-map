@@ -1,6 +1,6 @@
 {
   "_comment": "路線の線の太さ・線種のパラメータ。プログラミング不要で編集できます。thresholds=本数(平日・片方向)の境界値: 本数<dashBelow→点線, dashBelow〜normal未満→細線, normal〜thick未満→普通, thick以上→太線。line/casing=実線の太さ[細,普通,太]をズーム別に(casingは下に敷く縁取りで少し太め)。dashed=点線の太さ(ズーム別)と破線パターン。値を変えて保存すると地図に反映されます(開発サーバー実行中)。",
-  "thresholds": { "dashBelow": 25, "normal": 60, "thick": 130 },
+  "thresholds": { "dashBelow": 15, "normal": 60, "thick": 130 },
   "line": [
     { "zoom": 8, "tiers": [0.8, 1.6, 2.6] },
     { "zoom": 12, "tiers": [1.6, 3.2, 5] },

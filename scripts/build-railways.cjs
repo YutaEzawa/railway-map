@@ -65,8 +65,9 @@ const SERVICE_STATION_SET = {}
 for (const [base, services] of Object.entries(SERVICE_LINES)) {
   const set = (SERVICE_STATION_SET[base] = new Set())
   for (const sv of services) {
-    const row = CSV_ROWS.find((r) => r.line === sv.name)
-    if (row) for (const st of row.stations) set.add(st)
+    // 区間分割されている場合も含めて全行を収集する。
+    const rows = CSV_ROWS.filter((r) => r.line === sv.name)
+    for (const row of rows) for (const st of row.stations) set.add(st)
   }
 }
 
@@ -526,7 +527,9 @@ function main() {
   const stationToSection = {} // 路線名 -> { 駅名: label }
   for (const [line, secs] of Object.entries(LINE_SECTIONS)) {
     const m = (stationToSection[line] = {})
-    for (const s of secs) for (const name of s.stations) m[name] = s.label
+    // 先書き優先: 複数区間に現れる境界駅は最初の区間（より手前）に属させる。
+    // 境界セグメント検出（後述）と組み合わせ、セグメントを正しい区間に割り当てる。
+    for (const s of secs) for (const name of s.stations) if (!(name in m)) m[name] = s.label
   }
   // 区間割り当て用に、区間定義のある路線（事業者問わず）の駅座標を集める。
   // CORRIDORS の base 路線は、ゾーンに登録した駅のみ集めて zone も持たせる。
@@ -635,7 +638,22 @@ function main() {
     } else if (SERVICE_LINES[name] && inServiceZone(name, f.geometry.coordinates)) {
       outs = SERVICE_LINES[name].map((sv) => ({ line: sv.name, trainKey: sv.name, color: sv.color, offset: sv.offset }))
     } else if (LINE_SECTIONS[name]) {
-      const section = sectionOf(name, mx, my)
+      // 中点判定では区間境界をまたぐセグメントの割り当てが不安定になる。
+      // 両端の最寄り駅が異なる区間に属するとき（境界セグメント）は、
+      // CSV の記載順で後ろ（より遠方）の区間に割り当て、境界を明確にする。
+      const stmap = stationToSection[name]
+      const na = nearestStation(name, coords[0][0], coords[0][1])
+      const nb = nearestStation(name, coords[coords.length - 1][0], coords[coords.length - 1][1])
+      const sa = na ? stmap[na] : undefined
+      const sb = nb ? stmap[nb] : undefined
+      let section
+      if (sa && sb && sa !== sb) {
+        const idxA = LINE_SECTIONS[name].findIndex((s) => s.label === sa)
+        const idxB = LINE_SECTIONS[name].findIndex((s) => s.label === sb)
+        section = idxA < idxB ? sb : sa
+      } else {
+        section = sectionOf(name, mx, my)
+      }
       outs = [{ line: name, trainKey: section, color: LINE_COLORS[name] || DEFAULT_COLOR, section }]
     } else {
       outs = [{ line: name, trainKey: name, color: LINE_COLORS[name] || DEFAULT_COLOR }]
@@ -654,7 +672,13 @@ function main() {
   }
   const railwayFeatures = Object.keys(lines).map((key) => {
     const e = lines[key]
-    const props = { line: e.line, category: e.category, color: e.color, trains: TRAINS[e.trainKey] ?? DEFAULT_TRAINS }
+    // 区間分割された路線の SERVICE_LINES/CORRIDORS 参照では trainKey がサービス名（区間なし）に
+    // なるため、セクションキーの最初の一致をフォールバックとして使う。
+    const resolveTrains = (key) =>
+      TRAINS[key] ?? Object.values(
+        Object.fromEntries(Object.entries(TRAINS).filter(([k]) => k.startsWith(key + '(')))
+      )[0] ?? DEFAULT_TRAINS
+    const props = { line: e.line, category: e.category, color: e.color, trains: resolveTrains(e.trainKey) }
     if (e.section) props.section = e.section
     if (e.offset) props.offset = e.offset
     return { type: 'Feature', properties: props, geometry: { type: 'MultiLineString', coordinates: e.coords } }

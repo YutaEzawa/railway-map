@@ -15,7 +15,8 @@ user-invocable: true
 
 1. **スクレイプ**（`train-counts/scrape-yahoo-trains.cjs`）  
    Yahoo!路線情報の時刻表から各区間の平日・片方向の発車本数を数え、
-   `train-counts/train-counts.json` に出力する。
+   `train-counts/train-counts.json` に出力する。同じ発車時刻（時:分）は
+   1 本として数える（臨時・連結列車の重複掲載を除くため）。
 
 2. **差分確認**（`train-counts/apply-train-counts.cjs` のドライラン）  
    スクレイプ結果と CSV 現在値の差分を表示して確認を促す。
@@ -23,7 +24,11 @@ user-invocable: true
 3. **CSV 反映**（`train-counts/apply-train-counts.cjs --write`）  
    ユーザーが OK なら `data/lines.csv` の `本数` 列を更新する。
 
+4. **GeoJSON 再生成**（`scripts/build-railways.cjs`）  
+   CSV から `public/data/railways.geojson` を再生成する。**これをしないと地図に反映されない**。
+
 > スクレイプと反映は別スクリプト。CSV は手順 3 まで変更されない。
+> 地図（`public/data/railways.geojson`）は CSV から生成されるため、手順 4 まで実行して初めて表示に反映される。
 
 ## 手順
 
@@ -65,6 +70,19 @@ node train-counts/apply-train-counts.cjs [<路線名>...] --write
 ```bash
 node train-counts/apply-train-counts.cjs [<路線名>...] --only-empty --write
 ```
+
+### ステップ 4: GeoJSON を再生成（地図反映に必須）
+
+CSV を更新したら、地図が読む `public/data/railways.geojson` を再生成する。
+ステップ 3 で実際に CSV を変更した場合（ドライランのみで終わった場合は不要）に実行する。
+
+```bash
+node scripts/build-railways.cjs
+```
+
+- 入力（N02・県境データ）は `.data/` 配下を既定で参照する（無い場合は `N02_DIR` / `JAPAN_GEOJSON` で指定）。
+- `.data/` が無く再生成できない環境では、その旨をユーザーに伝える（CSV は更新済みだが地図は未反映）。
+- 完了後、ブラウザの再読み込みで反映される。
 
 ## 対応オプション（ユーザーが自然言語で指定できる）
 
