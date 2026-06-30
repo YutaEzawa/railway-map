@@ -36,6 +36,7 @@ const KANA_ROWS = ['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa']
 
 const RAILWAYS_PATH = path.resolve(__dirname, '../public/data/railways.geojson')
 const STATIONS_PATH = path.resolve(__dirname, '../public/data/stations.geojson')
+const REVIEW_PATH = path.resolve(__dirname, '../data/review.md')
 
 /** CSV 路線名 → Yahoo! 表示名（異なる場合のみ）。部分一致で使用する。 */
 const LINE_NAME_TO_YAHOO = {
@@ -96,6 +97,10 @@ const TOWARD_OVERRIDES = {
   上越新幹線: '大宮 新潟',
   東海道新幹線: '新横浜 名古屋',
 }
+
+// D: セグメント連結時の最大ギャップ（度）がこれを超えたら駅順序を信頼せず auto_fail。
+// 0.05度 ≈ 5.5km。隣接駅間の自然な間隔や軽微なデータ欠損は許容し、明確なワープのみ弾く。
+const GAP_FAIL_DEG = 0.05
 
 /**
  * 駅名・路線名の正規化（全角/半角・空白・JR表記を吸収）。
@@ -253,18 +258,46 @@ async function resolveStation(stationName, lineName, toward, stationIndex) {
 
 /**
  * MultiLineString のセグメント配列を、端点の近傍でつながるように順序付けて
- * 1本の折れ線（座標配列）を返す。
+ * 1本の折れ線にして返す。
  * N02 データはセグメントがランダム順のため、flat() では正しい経路にならない。
+ *
+ * 方式A: 端点の出現回数を数え、1回しか現れない端点（=路線の終端）を持つ
+ *   セグメントから連結を始める。これにより「線の途中から開始し、片側にしか
+ *   伸ばせず逆側へワープする」現象を防ぐ。
+ * 方式D: 連結時に跨いだ最大ギャップ（度）を `maxGap` として返す。呼び出し側が
+ *   閾値超過なら auto_fail に倒す安全網に使う。
+ *
+ * @returns {{ coords: number[][], maxGap: number }}
  */
 function chainSegments(segments) {
-  if (!segments || segments.length === 0) return []
-  if (segments.length === 1) return segments[0].slice()
+  if (!segments || segments.length === 0) return { coords: [], maxGap: 0 }
+  if (segments.length === 1) return { coords: segments[0].slice(), maxGap: 0 }
 
   const edist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1])
+  const key = (p) => `${p[0].toFixed(4)},${p[1].toFixed(4)}` // ≈11m で端点を同一視
 
-  // greedily chain segments by nearest-endpoint
-  const result = segments[0].slice()
-  const used = new Set([0])
+  // 各セグメント端点の出現回数を数える（degree 1 = 路線の終端）
+  const endpointCount = new Map()
+  for (const seg of segments) {
+    for (const p of [seg[0], seg[seg.length - 1]]) {
+      const k = key(p)
+      endpointCount.set(k, (endpointCount.get(k) || 0) + 1)
+    }
+  }
+
+  // degree-1 端点を持つセグメントを始点にする（無ければループ等 → segments[0]）
+  let startIdx = 0
+  let startReversed = false
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i]
+    if (endpointCount.get(key(seg[0])) === 1) { startIdx = i; startReversed = false; break }
+    if (endpointCount.get(key(seg[seg.length - 1])) === 1) { startIdx = i; startReversed = true; break }
+  }
+
+  const first = segments[startIdx]
+  const result = (startReversed ? [...first].reverse() : first.slice())
+  const used = new Set([startIdx])
+  let maxGap = 0
 
   while (used.size < segments.length) {
     const endPt = result[result.length - 1]
@@ -282,12 +315,13 @@ function chainSegments(segments) {
     }
 
     if (bestIdx < 0) break
+    if (bestDist > maxGap) maxGap = bestDist
     const seg = segments[bestIdx]
     result.push(...(bestReverse ? [...seg].reverse() : seg).slice(1))
     used.add(bestIdx)
   }
 
-  return result
+  return { coords: result, maxGap }
 }
 
 /** 点を折れ線に射影し、折れ線全長に対する位置 t∈[0,1] を返す。 */
@@ -329,21 +363,23 @@ function projectOntoPolyline(point, polyline) {
 /**
  * GeoJSON から lineName の路線上にある駅を順序付きで返す。
  * offset のない最初のフィーチャを基準路線として使用。
+ * @returns {{ stations: string[], maxGap: number }} maxGap はセグメント連結時の最大ギャップ（度）
  */
 function getOrderedStations(lineName, railwaysFC, stationsFC) {
   const feats = railwaysFC.features.filter((f) => f.properties.line === lineName)
-  if (!feats.length) return []
+  if (!feats.length) return { stations: [], maxGap: 0 }
 
   const feat = feats.find((f) => !f.properties.offset) || feats[0]
-  const coords =
+  const chained =
     feat.geometry.type === 'MultiLineString'
       ? chainSegments(feat.geometry.coordinates)
-      : feat.geometry.coordinates
+      : { coords: feat.geometry.coordinates, maxGap: 0 }
+  const coords = chained.coords
 
   const lineStations = stationsFC.features.filter(
     (f) => f.properties.lines && f.properties.lines.includes(lineName),
   )
-  if (!lineStations.length) return []
+  if (!lineStations.length) return { stations: [], maxGap: chained.maxGap }
 
   const withPos = lineStations.map((f) => ({
     name: f.properties.name,
@@ -351,7 +387,7 @@ function getOrderedStations(lineName, railwaysFC, stationsFC) {
   }))
   withPos.sort((a, b) => a.t - b.t)
 
-  return withPos.map((s) => s.name)
+  return { stations: withPos.map((s) => s.name), maxGap: chained.maxGap }
 }
 
 // ====== 本数解析 ======
@@ -362,6 +398,27 @@ function isSameFreq(a, b) {
   const diff = Math.abs(a - b)
   const avg = (a + b) / 2
   return diff <= Math.max(5, avg * 0.1)
+}
+
+/**
+ * 自己検証: 区間本数の「中間V字凹み」を検出する。
+ * 鉄道の本数は折返し駅でしか減らないため、線の途中で減って再び増える
+ * （内部の極小）のは物理的に不自然＝駅順序ずれ or カウント誤差の兆候。
+ * 該当区間の説明配列を返す（空なら問題なし）。人手確認を促すために使う。
+ */
+function findFreqDips(sections) {
+  const warnings = []
+  for (let i = 1; i < sections.length - 1; i++) {
+    const prev = sections[i - 1].freq
+    const cur = sections[i].freq
+    const next = sections[i + 1].freq
+    if (cur < prev && cur < next && !isSameFreq(cur, prev) && !isSameFreq(cur, next)) {
+      warnings.push(
+        `${sections[i].startStation}〜${sections[i].endStation} が ${cur}本 で前後（${prev}/${next}）より低い（中間の極小＝不自然）`,
+      )
+    }
+  }
+  return warnings
 }
 
 /**
@@ -520,12 +577,15 @@ function generateRows(lineName, result, originalRows) {
   }
 
   if (result.status === 'split') {
-    return result.sections.map((sec, i) => ({
+    // 自己検証で要確認（中間V字凹み等）が出た場合は auto_review として書き出す。
+    // 処理は止めず CSV には反映するが、後でまとめて人手確認する対象になる。
+    const status = result.warnings && result.warnings.length ? 'auto_review' : 'auto_v2'
+    return result.sections.map((sec) => ({
       line: lineName,
       section: `${lineName}(${sec.startStation}〜${sec.endStation})`,
       trains: sec.freq,
       stations: sec.stations,
-      status: 'auto_v2',
+      status,
     }))
   }
 
@@ -534,6 +594,61 @@ function generateRows(lineName, result, originalRows) {
     ...r,
     status: `auto_fail`,
   }))
+}
+
+// ====== 確認用ファイル ======
+
+/**
+ * data/review.md を CSV から再生成する。状態が auto_review（中間V字凹み等の要確認）
+ * または auto_fail（自動処理失敗）の路線をまとめ、後でまとめて人手確認できるようにする。
+ * CSV を真とするので何度実行しても安全（並列・複数回バッチでも壊れない）。
+ * @returns {number} 確認待ち路線数
+ */
+function writeReviewFile(allRows) {
+  const FLAG = new Set(['auto_review', 'auto_fail'])
+  const lines = [...new Set(allRows.filter((r) => FLAG.has(r.status)).map((r) => r.line))]
+
+  const out = []
+  out.push('# 区間分割 要確認リスト（自動生成）')
+  out.push('')
+  out.push('`split-lines` が自動処理した結果のうち、人手確認が必要なものの一覧。')
+  out.push('このファイルは `data/lines.csv` から生成される（`node split-lines/split-lines.cjs --review` で再生成）。')
+  out.push('')
+  out.push('- **auto_review** … 本数の中間V字凹みなど不自然な兆候あり。値は暫定で地図には反映済み。')
+  out.push('- **auto_fail** … 駅順序ずれ等で自動処理に失敗。本数は既定値のまま。')
+  out.push('')
+  out.push('確認して正しい区間・本数に直したら、その行の `状態` を `manual` にすると本リストから外れる。')
+  out.push('')
+
+  if (!lines.length) {
+    out.push('現在、確認待ちの路線はありません。 ✅')
+    out.push('')
+  } else {
+    out.push(`確認待ち: **${lines.length} 路線**`)
+    out.push('')
+    for (const line of lines) {
+      const rows = allRows.filter((r) => r.line === line && FLAG.has(r.status))
+      const kind = rows.some((r) => r.status === 'auto_review') ? 'auto_review' : 'auto_fail'
+      out.push(`## - [ ] ${line}  （${kind}）`)
+      if (kind === 'auto_review') {
+        out.push('')
+        out.push('| 区間 | 本数 |')
+        out.push('|------|------|')
+        for (const r of rows) {
+          out.push(`| ${r.section || '(全体)'} | ${r.trains == null ? '-' : r.trains} |`)
+        }
+        out.push('')
+        out.push('→ 本数の並びが不自然（中間で減って増える等）。実態を確認し区間・本数を修正。')
+      } else {
+        out.push('')
+        out.push('→ 自動処理失敗。`node split-lines/split-lines.cjs --line "' + line + '" --fresh` で理由を確認。')
+      }
+      out.push('')
+    }
+  }
+
+  fs.writeFileSync(REVIEW_PATH, out.join('\n'))
+  return lines.length
 }
 
 // ====== メイン ======
@@ -553,6 +668,13 @@ async function main() {
     const idx = argv.indexOf('--line')
     return idx >= 0 ? argv[idx + 1] : null
   })()
+
+  // --review: 確認用ファイルを CSV から再生成して終了（スクレイプなし・読み取り専用）
+  if (argv.includes('--review')) {
+    const n = writeReviewFile(readRows())
+    console.log(`確認用ファイルを再生成: data/review.md（確認待ち ${n} 路線）`)
+    return
+  }
 
   // GeoJSON 読み込み
   const railwaysFC = JSON.parse(fs.readFileSync(RAILWAYS_PATH, 'utf8'))
@@ -582,7 +704,7 @@ async function main() {
     console.log(`\n▶ ${lineName}`)
 
     // GeoJSON から順序付き駅リストを取得
-    const orderedStations = getOrderedStations(lineName, railwaysFC, stationsFC)
+    const { stations: orderedStations, maxGap } = getOrderedStations(lineName, railwaysFC, stationsFC)
     if (!orderedStations.length) {
       console.log(`  ✗ GeoJSONに駅データなし（スキップ）`)
       const origRows = allRows.filter((r) => r.line === lineName)
@@ -590,18 +712,33 @@ async function main() {
       continue
     }
 
+    // D: セグメント連結に大ギャップ（ワープ）があれば駅順序が信頼できない → auto_fail
+    if (maxGap > GAP_FAIL_DEG) {
+      const km = (maxGap * 111).toFixed(1)
+      console.log(`  ✗ セグメント連結に大ギャップ ${km}km → 駅順序の信頼性なし（auto_fail）`)
+      const origRows = allRows.filter((r) => r.line === lineName)
+      results.push({ lineName, result: { status: 'fail', reason: `連結ギャップ${km}km（駅順序不確実）` }, newRows: origRows.map((r) => ({ ...r, status: 'auto_fail' })) })
+      continue
+    }
+
     console.log(`  駅数: ${orderedStations.length}（${orderedStations[0]} → ${orderedStations[orderedStations.length - 1]}）`)
 
     const result = await analyzeLine(lineName, orderedStations, stationIndex)
+    // 自己検証: 中間V字凹みがあれば要確認フラグを立てる（generateRows の status に反映）
+    result.warnings = result.status === 'split' ? findFreqDips(result.sections) : []
     const origRows = allRows.filter((r) => r.line === lineName)
     const newRows = generateRows(lineName, result, origRows)
 
     if (result.status === 'uniform') {
       console.log(`  ✓ 均一 ${result.freq}本 → auto_v1`)
     } else if (result.status === 'split') {
-      console.log(`  ✓ 区間分割 ${result.sections.length}区間 → auto_v2`)
+      const tag = result.warnings.length ? 'auto_review（要確認）' : 'auto_v2'
+      console.log(`  ✓ 区間分割 ${result.sections.length}区間 → ${tag}`)
       for (const sec of result.sections) {
         console.log(`    ${sec.startStation}〜${sec.endStation}: ${sec.freq}本 (${sec.stations.length}駅)`)
+      }
+      for (const w of result.warnings) {
+        console.log(`    ⚠ 要確認: ${w}`)
       }
     } else {
       console.log(`  ✗ 失敗: ${result.reason}`)
@@ -613,12 +750,24 @@ async function main() {
   // 結果をサマリー表示
   console.log('\n=== サマリー ===')
   for (const { lineName, result } of results) {
-    const mark = result.status === 'fail' ? '✗' : '✓'
+    const hasWarn = result.warnings && result.warnings.length
+    const mark = result.status === 'fail' ? '✗' : hasWarn ? '⚠' : '✓'
     const detail =
       result.status === 'uniform' ? `均一 ${result.freq}本` :
       result.status === 'split' ? `${result.sections.length}区間に分割` :
       result.reason
     console.log(`  ${mark} ${lineName}: ${detail}`)
+  }
+
+  // 自己検証: 要確認（中間V字凹み）の路線を明示。--write 前に必ず人手確認する
+  const flagged = results.filter((r) => r.result.warnings && r.result.warnings.length)
+  if (flagged.length) {
+    console.log('\n=== ⚠ 要確認（自動値をそのまま信用しない）===')
+    for (const { lineName, result } of flagged) {
+      for (const w of result.warnings) console.log(`  ${lineName}: ${w}`)
+    }
+    console.log('  → 本数の中間極小は折返し駅でしか起きないはず。駅順序ずれ/カウント誤差の疑い。')
+    console.log('    実態を確認し、必要なら手動で区間・本数を修正（manual）すること。')
   }
 
   if (!writeMode) {
@@ -647,6 +796,12 @@ async function main() {
 
   writeRows(newAllRows)
   console.log(`\nCSV を更新しました: data/lines.csv（${results.length}路線）`)
+
+  // 確認用ファイルを更新（要確認・失敗をまとめ、処理は止めずに進められる）
+  const reviewCount = writeReviewFile(newAllRows)
+  if (reviewCount) {
+    console.log(`⚠ 確認待ち ${reviewCount} 路線 → data/review.md にまとめました（まとめて確認してください）`)
+  }
   console.log('GeoJSON を再生成するには: node scripts/build-railways.cjs')
 }
 
