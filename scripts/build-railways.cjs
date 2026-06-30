@@ -110,7 +110,7 @@ const CORRIDORS = {
       label: '東海道本線(東京〜横浜)',
       services: [
         { name: '京浜東北線', color: '#00BAE8', offset: 1 },
-        { name: '東海道線', color: '#F68B1E', offset: -1 },
+        { name: '東海道線', color: '#F68B1E', offset: -1, trainSection: '東京〜横浜' },
       ],
       stations: '有楽町 新橋 浜松町 田町 高輪ゲートウェイ 品川 大井町 大森 蒲田 川崎 鶴見 新子安 東神奈川'.split(' '),
     },
@@ -120,16 +120,22 @@ const CORRIDORS = {
       // 横須賀は offset 0（大船〜久里浜の単独区間と揃えて連続させる）、東海道を -1 にずらす。
       label: '東海道・横須賀(横浜〜大船)',
       services: [
-        { name: '東海道線', color: '#F68B1E', offset: -1 },
+        { name: '東海道線', color: '#F68B1E', offset: -1, trainSection: '横浜〜大船' },
         { name: '横須賀線', color: '#0072BC', offset: 0 },
       ],
       stations: '横浜 保土ヶ谷 東戸塚 戸塚 大船'.split(' '),
     },
     {
-      // 大船以西: 東海道線（中距離）単独。
-      label: '東海道線(大船〜熱海)',
-      services: [{ name: '東海道線', color: '#F68B1E', offset: 0 }],
-      stations: '藤沢 辻堂 茅ヶ崎 平塚 大磯 二宮 国府津 鴨宮 小田原 早川 根府川 真鶴 湯河原 熱海'.split(' '),
+      // 大船〜小田原: 東海道線（中距離）単独。湘南エリア。
+      label: '東海道線(大船〜小田原)',
+      services: [{ name: '東海道線', color: '#F68B1E', offset: 0, trainSection: '大船〜小田原' }],
+      stations: '藤沢 辻堂 茅ヶ崎 平塚 大磯 二宮 国府津 鴨宮 小田原'.split(' '),
+    },
+    {
+      // 小田原〜熱海: 東海道線（中距離）単独。本数が減少する末端区間。
+      label: '東海道線(小田原〜熱海)',
+      services: [{ name: '東海道線', color: '#F68B1E', offset: 0, trainSection: '小田原〜熱海' }],
+      stations: '早川 根府川 真鶴 湯河原 熱海'.split(' '),
     },
     {
       // 品鶴線（東京方の横須賀線・湘南新宿）: 横須賀線単独。主線（鶴見・川崎）の近くを
@@ -620,7 +626,10 @@ function main() {
     if (CORRIDORS[name]) {
       // 系統が重なる JR 幹線: セグメントの通称ゾーンの各サービスを引く（共用区間は offset で並走）。
       const zone = corridorOfSegment(name, coords)
-      outs = zone.services.map((sv) => ({ line: sv.name, trainKey: sv.name, color: sv.color, offset: sv.offset }))
+      outs = zone.services.map((sv) => {
+        const sec = sv.trainSection ? `${sv.name}(${sv.trainSection})` : undefined
+        return { line: sv.name, trainKey: sec || sv.name, section: sec, color: sv.color, offset: sv.offset }
+      })
     } else if (
       STATION_RELABEL[name] &&
       (relabel = (() => {
@@ -674,10 +683,17 @@ function main() {
     const e = lines[key]
     // 区間分割された路線の SERVICE_LINES/CORRIDORS 参照では trainKey がサービス名（区間なし）に
     // なるため、セクションキーの最初の一致をフォールバックとして使う。
-    const resolveTrains = (key) =>
-      TRAINS[key] ?? Object.values(
+    // CORRIDORS ゾーン別キー（例: 東海道線(東京〜横浜)）の場合はサービス名ベース（東海道線）も試みる。
+    const resolveTrains = (key) => {
+      if (TRAINS[key] !== undefined) return TRAINS[key]
+      const prefixMatch = Object.values(
         Object.fromEntries(Object.entries(TRAINS).filter(([k]) => k.startsWith(key + '(')))
-      )[0] ?? DEFAULT_TRAINS
+      )[0]
+      if (prefixMatch !== undefined) return prefixMatch
+      const m = /^(.+)\([^)]+\)$/.exec(key)
+      if (m && TRAINS[m[1]] !== undefined) return TRAINS[m[1]]
+      return DEFAULT_TRAINS
+    }
     const props = { line: e.line, category: e.category, color: e.color, trains: resolveTrains(e.trainKey) }
     if (e.section) props.section = e.section
     if (e.offset) props.offset = e.offset
