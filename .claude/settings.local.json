@@ -13,7 +13,12 @@
       "Read(//private/tmp/**)",
       "Bash(pkill -f \"vite\")",
       "WebFetch(domain:ckan.odpt.org)",
-      "Bash(node -e \"console.log\\('node fetch available:', typeof fetch==='function'\\); console.log\\('node', process.version\\)\")"
+      "Bash(node -e \"console.log\\('node fetch available:', typeof fetch==='function'\\); console.log\\('node', process.version\\)\")",
+      "Bash(node split-lines/split-lines.cjs --line \"ニューシャトル\")",
+      "Bash(node split-lines/split-lines.cjs --line \"ゆりかもめ\")",
+      "Bash(node split-lines/split-lines.cjs --line \"上越新幹線\")",
+      "Bash(node split-lines/split-lines.cjs --line \"りんかい線\")",
+      "Bash(node split-lines/split-lines.cjs --count 100 --write)"
     ]
   }
 }
