@@ -1,54 +1,15 @@
 [
   {
-    "key": "東海道線(東京〜横浜)",
-    "line": "東海道線",
-    "section": "東海道線(東京〜横浜)",
-    "station": "品川",
-    "stationId": 22709,
-    "lineCode": "1171",
-    "direction": "横浜・小田原",
-    "weekdayCount": 146,
-    "manual": 146,
-    "sourceUrl": "https://transit.yahoo.co.jp/timetable/22709/1171?kind=1",
-    "fetchedAt": "2026-06-30T00:05:46.394Z"
-  },
-  {
-    "key": "東海道線(横浜〜大船)",
-    "line": "東海道線",
-    "section": "東海道線(横浜〜大船)",
-    "station": "横浜",
-    "stationId": 23368,
-    "lineCode": "1171",
-    "direction": "大船・小田原",
-    "weekdayCount": 136,
-    "manual": 136,
-    "sourceUrl": "https://transit.yahoo.co.jp/timetable/23368/1171?kind=1",
-    "fetchedAt": "2026-06-30T00:05:46.397Z"
-  },
-  {
-    "key": "東海道線(大船〜小田原)",
-    "line": "東海道線",
-    "section": "東海道線(大船〜小田原)",
-    "station": "平塚",
-    "stationId": 23298,
-    "lineCode": "1171",
-    "direction": "小田原・熱海",
-    "weekdayCount": 131,
-    "manual": 131,
-    "sourceUrl": "https://transit.yahoo.co.jp/timetable/23298/1171?kind=1",
-    "fetchedAt": "2026-06-30T00:05:46.398Z"
-  },
-  {
-    "key": "東海道線(小田原〜熱海)",
-    "line": "東海道線",
-    "section": "東海道線(小田原〜熱海)",
-    "station": "小田原",
-    "stationId": 23098,
-    "lineCode": "1171",
-    "direction": "熱海・沼津",
-    "weekdayCount": 64,
-    "manual": 64,
-    "sourceUrl": "https://transit.yahoo.co.jp/timetable/23098/1171?kind=1",
-    "fetchedAt": "2026-06-30T00:05:46.400Z"
+    "key": "湘南新宿ライン",
+    "line": "湘南新宿ライン",
+    "section": null,
+    "station": "大宮",
+    "stationId": 21987,
+    "lineCode": "1050",
+    "direction": "新宿・横浜",
+    "weekdayCount": 80,
+    "manual": null,
+    "sourceUrl": "https://transit.yahoo.co.jp/timetable/21987/1050?kind=1",
+    "fetchedAt": "2026-06-30T12:58:53.096Z"
   }
 ]
