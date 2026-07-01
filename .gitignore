@@ -18,6 +18,9 @@ dist-ssr
 # スクリプト用の環境変数（ODPT キー等）。.env.example はコミットする。
 .env
 
+# Claude Code のローカル作業ディレクトリ（git worktree 等）。コミットしない。
+.claude/worktrees
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
