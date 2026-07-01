@@ -32,11 +32,11 @@ export const WHITE_MAP_STYLE: StyleSpecification = {
   ],
 }
 
-/** 初期表示（南関東一都三県＝埼玉・千葉・東京・神奈川の本土が収まる位置）。 */
+/** 初期表示（南関東＋北関東＝茨城・栃木・群馬・埼玉・千葉・東京・神奈川の本土が収まる位置）。 */
 export const INITIAL_VIEW_STATE = {
-  longitude: 139.75,
-  latitude: 35.65,
-  zoom: 8.2,
+  longitude: 139.7,
+  latitude: 36.0,
+  zoom: 7.4,
 }
 
 /** 白地図タイルの最大ズーム（14）。overzoom で 16 まで拡大表示を許容する。 */

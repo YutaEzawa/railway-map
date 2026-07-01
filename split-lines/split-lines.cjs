@@ -31,7 +31,7 @@ const UA = 'railway-map-hobby-scraper/0.1 (personal use; https://github.com/)'
 const CACHE_DIR = path.resolve(__dirname, '../.data/yahoo-cache')
 const REQUEST_DELAY_MS = 1200
 const WEEKDAY_KIND = 1
-const PREF_CODES = { 埼玉: 11, 千葉: 12, 東京: 13, 神奈川: 14 }
+const PREF_CODES = { 茨城: 8, 栃木: 9, 群馬: 10, 埼玉: 11, 千葉: 12, 東京: 13, 神奈川: 14 }
 const KANA_ROWS = ['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa']
 
 const RAILWAYS_PATH = path.resolve(__dirname, '../public/data/railways.geojson')
@@ -75,6 +75,10 @@ const LINE_NAME_TO_YAHOO = {
   金沢シーサイドライン: '金沢シーサイドライン',
   ニューシャトル: '埼玉新都市交通伊奈線',
   多摩都市モノレール線: '多摩都市モノレール',
+  // 北関東
+  竜ヶ崎線: '竜ケ崎線', // Yahoo は「関東鉄道竜ケ崎線」（ヶ でなく ケ）
+  宇都宮芳賀ライトレール線: '宇都宮ライトレール',
+  筑波山鋼索鉄道線: '筑波山ケーブルカー',
 }
 
 /**

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## プロジェクト概要
 
-南関東一都三県（埼玉・千葉・東京・神奈川）の鉄道（JR 東日本＋私鉄・三セク）全路線を、国土地理院の**白地図タイル**を背景に、**実緯度経度**で表示する趣味の Web アプリ。地図描画は MapLibre GL（`react-map-gl`）を使い、路線・駅データは国土数値情報（鉄道データ N02）から生成した GeoJSON を読み込む。凡例のチェックボックスで JR / 私鉄 の表示を切り替えられる。Vite + React + TypeScript で構築し、`main` への push で Cloudflare Pages に自動デプロイされる。
+南関東（埼玉・千葉・東京・神奈川）＋北関東（茨城・栃木・群馬）＝関東一都六県の鉄道（JR 東日本＋私鉄・三セク）全路線を、国土地理院の**白地図タイル**を背景に、**実緯度経度**で表示する趣味の Web アプリ。地図描画は MapLibre GL（`react-map-gl`）を使い、路線・駅データは国土数値情報（鉄道データ N02）から生成した GeoJSON を読み込む。凡例のチェックボックスで JR / 私鉄 の表示を切り替えられる。Vite + React + TypeScript で構築し、`main` への push で Cloudflare Pages に自動デプロイされる。
 
 ## コマンド
 
@@ -22,7 +22,7 @@ npm run preview   # preview the production build locally
 **エントリーポイント**: `src/main.tsx` → `src/App.tsx` → `src/map/MapView.tsx`
 
 **データ生成** (`scripts/build-railways.cjs`):
-- 国土数値情報 鉄道データ N02（GeoJSON。全国版）と都道府県境界 GeoJSON を入力に、**対象都県内（`TARGET_PREF_IDS`＝埼玉11/千葉12/東京13/神奈川14 の和集合）の全鉄道事業者**を抽出して 2 つの静的 GeoJSON を生成する。各路線・駅に `category`（`jr`=東日本旅客鉄道 / `private`=それ以外）を付与。
+- 国土数値情報 鉄道データ N02（GeoJSON。全国版）と都道府県境界 GeoJSON を入力に、**対象都県内（`TARGET_PREF_IDS`＝茨城8/栃木9/群馬10/埼玉11/千葉12/東京13/神奈川14 の和集合）の全鉄道事業者**を抽出して 2 つの静的 GeoJSON を生成する。各路線・駅に `category`（`jr`=東日本旅客鉄道 / `private`=それ以外）を付与。
   - `public/data/railways.geojson` — 路線（MultiLineString、`line`/`category`/`color`/`trains`、区間分割時は `section`）
   - `public/data/stations.geojson` — 駅（Point、`name`/`lines`/`isJr`/`isPrivate`/`major`、停車本数があれば `stopTrains`＋`stopTypes`）。`major`=乗換駅 or 主要ターミナル。`stopTrains`=平日・片方向の合計停車（発車）本数、`stopTypes`=種別ごとの停車本数 `{種別:本数}` の JSON 文字列（geojson は入れ子を文字列化するため）。ともに急行/各停で停車パターンが違う路線の駅だけ持つ（`train-counts/station-stops.json` 由来）。
 - **区間と本数は `data/lines.csv`（手編集の単一ソース）から読み込む**（`scripts/lines-csv.cjs` 経由）。CSV 列は `路線,区間,本数,駅`。CSV に無い路線は既定値（色＝灰色 `DEFAULT_COLOR`、本数＝`DEFAULT_TRAINS`）で描画される。
@@ -37,7 +37,7 @@ npm run preview   # preview the production build locally
 - **停車本数（駅サイズ用）**: 線の太さ＝通過本数（`trains`）、駅の丸サイズ＝停車本数（`stopTrains`）の 2 チャンネルで急行/各停の差を表す。`train-counts/scrape-station-stops.cjs` が対象路線（`TARGET_LINES`。現状は西武池袋線・京王線）の全駅について、上り（東京寄り終端）方向の平日発車本数を Yahoo!路線情報の埋め込み JSON から**種別ごと＋合計**で数えて `train-counts/station-stops.json`（`{路線:{駅名:{total,types}}}`）に出力する。`build-railways.cjs` がこれを読み駅フィーチャに `stopTrains`（合計）＋`stopTypes`（種別内訳の JSON 文字列）を付ける。地図で駅ドットをクリックすると種別ごと・合計の停車本数がポップアップに出る。直通サービス（西武→副都心線・京王→都営新宿線）は Yahoo 上で別路線扱いのため含まれない近似。対象路線を増やすにはスクレイパの `TARGET_LINES` に `{ line, terminals }` を追加して再取得→`build-railways.cjs` 再実行。
 
 **地図レイヤー** (`src/map/`):
-- `config.ts` — 白地図スタイル（`WHITE_MAP_STYLE`、国土地理院 `xyz/blank` ラスタ、ズーム 5〜14・overzoom で 16）、初期ビュー（`INITIAL_VIEW_STATE`、南関東一都三県の本土全体）、出典文字列を定義。
+- `config.ts` — 白地図スタイル（`WHITE_MAP_STYLE`、国土地理院 `xyz/blank` ラスタ、ズーム 5〜14・overzoom で 16）、初期ビュー（`INITIAL_VIEW_STATE`、関東一都六県の本土全体）、出典文字列を定義。
 - `MapView.tsx` — `react-map-gl/maplibre` の `<Map>` に白地図を表示。GeoJSON は TanStack Query で fetch。路線は `<Source>`+`<Layer type="line">`（色は `['get','color']`、視認性のため暗いケーシングを下に敷く）、全駅は circle レイヤー（`stopTrains` があれば停車本数比例、無ければ `major` で 2 値のサイズ）、駅名ラベルは `<Marker>`（HTML）で描く。JR/私鉄チェックボックスの状態からレイヤー `filter` を組み立てて表示を切替。駅ラベルは全体表示では主要駅のみ、ズーム（`LABEL_ALL_ZOOM`）で全駅に切り替わる。凡例＋切替パネルを左上に重ねる。
 
 **路線・駅データの更新方法**:
