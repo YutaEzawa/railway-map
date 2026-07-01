@@ -114,9 +114,9 @@ function normLine(s) {
     .replace(/^JR(東日本|東海|西日本)?/i, '')
 }
 
-/** 駅名の正規化（県名サフィックス (◯◯県) を除去）。 */
+/** 駅名の正規化（県名サフィックス (◯◯県) を除去、小書き ヶ→ケ を統一）。 */
 function normStation(s) {
-  return String(s).normalize('NFKC').replace(/\s+/g, '').replace(/[(（].*?[)）]/g, '')
+  return String(s).normalize('NFKC').replace(/\s+/g, '').replace(/[(（].*?[)）]/g, '').replace(/ヶ/g, 'ケ')
 }
 
 function cachePath(key) {
@@ -218,6 +218,64 @@ async function countWeekday(stationId, lineCode) {
   let m
   while ((m = re.exec(html))) times.add(`${m[1]}:${m[2]}`)
   return times.size
+}
+
+/** 列車名（trainName）→ 種別へ正規化。特急◯◯N号 の愛称・号数を落とす。 */
+function normKind(name) {
+  let n = String(name).replace(/\s+/g, '')
+  const pre = n.match(/^(準特急|通勤特急|通勤快速特急)/)
+  if (pre) return pre[1]
+  if (n.includes('特急')) return '特急'
+  n = n.replace(/[0-9０-９]+号$/, '').replace(/号$/, '')
+  return n || 'その他'
+}
+
+/**
+ * 平日時刻表の「種別ごと・合計の停車（発車）本数」を数える。
+ * ページ埋め込み JSON（時ごとの minTimeTable[{minute,trainName,...}]）を解析し、
+ * 同じ時:分は 1 本に集約（臨時・連結の重複掲載を除く）。返り値 { total, types }。
+ */
+async function countWeekdayTypes(stationId, lineCode) {
+  const html = await fetchPath(
+    `/timetable/${stationId}/${lineCode}?kind=${WEEKDAY_KIND}`,
+    `tt_${stationId}_${lineCode}_k${WEEKDAY_KIND}`,
+  )
+  const start = html.indexOf('[{"hour"')
+  if (start < 0) return { total: 0, types: {} }
+  // ブラケット対応で hour 配列 [{...}] を切り出して JSON.parse。
+  let i = start,
+    depth = 0,
+    inStr = false,
+    esc = false
+  for (; i < html.length; i++) {
+    const c = html[i]
+    if (esc) { esc = false; continue }
+    if (c === '\\') { esc = true; continue }
+    if (c === '"') { inStr = !inStr; continue }
+    if (inStr) continue
+    if (c === '[') depth++
+    else if (c === ']') { depth--; if (depth === 0) { i++; break } }
+  }
+  let hours
+  try {
+    hours = JSON.parse(html.slice(start, i))
+  } catch {
+    return { total: 0, types: {} }
+  }
+  const seen = new Set()
+  const types = {}
+  let total = 0
+  for (const h of hours) {
+    for (const t of h.minTimeTable || []) {
+      const key = `${h.hour}:${t.minute}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      total++
+      const k = normKind(t.trainName)
+      types[k] = (types[k] || 0) + 1
+    }
+  }
+  return { total, types }
 }
 
 /** CSV 行 → 取得対象（代表駅 ID・路線コード・方向ラベル）を解決。 */
@@ -352,7 +410,21 @@ async function main() {
   console.log(`\n出力: ${path.relative(process.cwd(), OUT_PATH)}（${results.length}件）。CSV は変更していません。`)
 }
 
-main().catch((e) => {
-  console.error(e)
-  process.exit(1)
-})
+// 直接実行時のみ本数差分レポートを走らせる。駅別停車本数スクレイパ
+// (scrape-station-stops.cjs) からはヘルパーを再利用するため require される。
+if (require.main === module) {
+  main().catch((e) => {
+    console.error(e)
+    process.exit(1)
+  })
+}
+
+module.exports = {
+  buildStationIndex,
+  getStationLines,
+  countWeekday,
+  countWeekdayTypes,
+  normLine,
+  normStation,
+  STATION_ID_OVERRIDES,
+}

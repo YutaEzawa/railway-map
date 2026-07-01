@@ -28,6 +28,26 @@ const JAPAN_GEOJSON =
   process.env.JAPAN_GEOJSON || path.resolve(__dirname, '../.data/japan.geojson')
 const OUT_DIR = path.resolve(__dirname, '../public/data')
 
+// 駅別の停車本数（平日・片方向）。急行/各停で停車パターンが違う路線の駅サイズ用。
+// train-counts/scrape-station-stops.cjs が生成。{ 路線: { 駅名: { total, types } } }。無くても可。
+const STOPS_PATH = path.resolve(__dirname, '../train-counts/station-stops.json')
+const STOP_TRAINS = fs.existsSync(STOPS_PATH)
+  ? JSON.parse(fs.readFileSync(STOPS_PATH, 'utf8'))
+  : {}
+
+/**
+ * 駅の停車本数を返す。その駅が属する路線のうち合計本数が最大のものの { total, types }
+ * （データが無ければ null）。乗換駅で複数路線にデータがある場合は本数の多い方を採用。
+ */
+function stopTrainsFor(name, lineList) {
+  let best = null
+  for (const line of lineList) {
+    const rec = STOP_TRAINS[line] && STOP_TRAINS[line][name]
+    if (rec && typeof rec.total === 'number' && (best === null || rec.total > best.total)) best = rec
+  }
+  return best
+}
+
 const JR_OPERATOR = '東日本旅客鉄道'
 /** 対象都県（japan.geojson の id）。埼玉=11 / 千葉=12 / 東京=13 / 神奈川=14。 */
 const TARGET_PREF_IDS = [11, 12, 13, 14]
@@ -778,6 +798,7 @@ function main() {
       const [x, y] = centroid(cl.map((p) => [p.x, p.y]))
       const lineList = [...new Set(cl.map((p) => p.line))]
       const major = lineList.length > 1 || MAJOR_STATIONS.has(name)
+      const stop = stopTrainsFor(name, lineList)
       stationFeatures.push({
         type: 'Feature',
         properties: {
@@ -786,6 +807,8 @@ function main() {
           isJr: cl.some((p) => p.jr),
           isPrivate: cl.some((p) => !p.jr),
           major,
+          // stopTrains=合計（駅サイズ用）、stopTypes=種別内訳の JSON 文字列（ポップアップ用）。
+          ...(stop ? { stopTrains: stop.total, stopTypes: JSON.stringify(stop.types) } : {}),
         },
         geometry: { type: 'Point', coordinates: [x, y] },
       })

@@ -51,6 +51,33 @@
   color: #444444;
 }
 
+/* 停車本数の種別内訳（駅ポップアップ）。 */
+.map-view__popup-stops {
+  margin-top: 6px;
+  padding-top: 4px;
+  border-top: 1px solid #dddddd;
+  min-width: 140px;
+}
+
+.map-view__popup-stops-head {
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+.map-view__popup-stop-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #333333;
+}
+
+.map-view__popup-stop-total {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 1px solid #eeeeee;
+  font-weight: 700;
+}
+
 /* 表示切替＋凡例パネル（右上に重ねる）。詳細を開くと縦に伸びるのでスクロール可。 */
 .map-view__panel {
   position: absolute;

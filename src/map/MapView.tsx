@@ -36,6 +36,10 @@ type StationProps = {
   isJr: boolean
   isPrivate: boolean
   major: boolean
+  /** 合計停車本数（平日・片方向）。急行/各停で停車パターンが違う路線の駅だけ持つ。 */
+  stopTrains?: number
+  /** 種別ごとの停車本数 { 種別: 本数 } の JSON 文字列（geojson は入れ子を文字列化するため）。 */
+  stopTypes?: string
 }
 type RailwaysData = FeatureCollection<LineString | MultiLineString, LineProps>
 type StationsData = FeatureCollection<Point, StationProps>
@@ -138,7 +142,21 @@ const lineHitLayer: LineLayerSpecification = {
   },
 }
 
-/** 駅ドット（全駅）。主要駅は一回り大きく。 */
+// 停車本数(stopTrains)を持つ駅は本数に比例した半径、持たない駅は major で2値。
+// stopTrains の値域は概ね 40〜380本（西武池袋線・京王線）。下限/上限でクランプ。
+const STOP_MIN = 40
+const STOP_MAX = 380
+/** あるズームでの円半径式：stopTrains があれば本数比例、無ければ major 2値。 */
+function radiusAtZoom(stopLo: number, stopHi: number, majorR: number, minorR: number) {
+  return [
+    'case',
+    ['has', 'stopTrains'],
+    ['interpolate', ['linear'], ['get', 'stopTrains'], STOP_MIN, stopLo, STOP_MAX, stopHi],
+    ['case', ['get', 'major'], majorR, minorR],
+  ]
+}
+
+/** 駅ドット（全駅）。停車本数があれば本数比例サイズ、無ければ主要駅を一回り大きく。 */
 const stationLayer: CircleLayerSpecification = {
   id: 'stations',
   type: 'circle',
@@ -146,10 +164,10 @@ const stationLayer: CircleLayerSpecification = {
   paint: {
     'circle-radius': [
       'interpolate', ['linear'], ['zoom'],
-      8, ['case', ['get', 'major'], 3, 1.6],
-      12, ['case', ['get', 'major'], 5, 3],
-      16, ['case', ['get', 'major'], 7, 5],
-    ],
+      8, radiusAtZoom(1.6, 4, 3, 1.6),
+      12, radiusAtZoom(2.5, 8, 5, 3),
+      16, radiusAtZoom(4, 13, 7, 5),
+    ] as unknown as ExpressionSpecification,
     'circle-color': '#ffffff',
     'circle-stroke-color': '#333333',
     'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 8, 1, 12, 1.8, 16, 2.5],
@@ -166,7 +184,16 @@ function useGeoJSON<T>(url: string) {
 
 /** クリックで表示するポップアップ情報。 */
 type PopupInfo =
-  | { kind: 'station'; lng: number; lat: number; name: string; lines: string[] }
+  | {
+      kind: 'station'
+      lng: number
+      lat: number
+      name: string
+      lines: string[]
+      stopTrains?: number
+      /** 種別ごとの停車本数（本数降順）。停車本数データがある駅のみ。 */
+      stopTypes?: [string, number][]
+    }
   | { kind: 'line'; lng: number; lat: number; line: string; section?: string; trains: number; category: Category }
 
 /** クリック判定の対象レイヤー（駅ドットと、路線用の透明な太線）。 */
@@ -194,11 +221,28 @@ export default function MapView() {
     const station = feats.find((f) => f.layer.id === 'stations')
     if (station) {
       const [lng, lat] = (station.geometry as Point).coordinates
-      let lines = station.properties?.lines
+      const props = station.properties ?? {}
+      let lines = props.lines
       if (typeof lines === 'string') {
         try { lines = JSON.parse(lines) } catch { lines = [] }
       }
-      setPopup({ kind: 'station', lng, lat, name: station.properties?.name, lines: lines ?? [] })
+      // stopTypes は JSON 文字列。パースして本数降順の配列にする。
+      let stopTypes: [string, number][] | undefined
+      if (typeof props.stopTypes === 'string') {
+        try {
+          stopTypes = (Object.entries(JSON.parse(props.stopTypes)) as [string, number][]).sort(
+            (a, b) => b[1] - a[1],
+          )
+        } catch { stopTypes = undefined }
+      }
+      setPopup({
+        kind: 'station',
+        lng, lat,
+        name: props.name,
+        lines: lines ?? [],
+        stopTrains: typeof props.stopTrains === 'number' ? props.stopTrains : undefined,
+        stopTypes,
+      })
       return
     }
     const line = feats.find((f) => f.layer.id === 'route-lines-hit')
@@ -394,6 +438,23 @@ export default function MapView() {
                 <div className="map-view__popup-row">
                   {popup.lines.length ? popup.lines.join(' / ') : '駅'}
                 </div>
+                {popup.stopTypes && popup.stopTypes.length > 0 && (
+                  <div className="map-view__popup-stops">
+                    <div className="map-view__popup-row map-view__popup-stops-head">
+                      停車本数（平日・片方向）
+                    </div>
+                    {popup.stopTypes.map(([kind, n]) => (
+                      <div key={kind} className="map-view__popup-stop-row">
+                        <span>{kind}</span>
+                        <span>{n} 本</span>
+                      </div>
+                    ))}
+                    <div className="map-view__popup-stop-row map-view__popup-stop-total">
+                      <span>合計</span>
+                      <span>{popup.stopTrains} 本</span>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="map-view__popup">
