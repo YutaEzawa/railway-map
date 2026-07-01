@@ -4,6 +4,9 @@ description: >
   data/lines.csv の「状態」が空（pending）の路線について、Yahoo!路線情報の時刻表から
   区間ごとの本数を自動取得し、本数が一様なら auto_v1、区間分割が必要なら auto_v2 で
   CSV を更新するスキル。「分割を自動化」「区間を自動生成」などと言われたときに使う。
+  また急行/各停で停車駅が違う路線を「駅サイズ＝停車本数・クリックで種別内訳」表示に
+  対応させる（scrape-station-stops.cjs）。「停車本数を駅に表示」「種別ごとの停車本数」
+  「この路線も駅サイズに反映」などと言われたときは末尾の「種別ごとの停車本数」節を使う。
 user-invocable: true
 ---
 
@@ -226,6 +229,74 @@ node scripts/build-railways.cjs
 | 方向が一意に決まらない | `split-lines.cjs` の `SECTION_OVERRIDES`（未実装の場合は `TOWARD_OVERRIDES`）に路線・向き先を追加 |
 | 変化点がおかしい | ドライランで区間・本数を確認し、`--line` で個別に再実行 |
 | スクレイプ結果が古い | `--fresh` でキャッシュを無効化 |
+
+## 種別ごとの停車本数（駅サイズ＋クリックで種別内訳）
+
+区間分割（線の太さ＝通過本数）とは**別チャンネル**で、**駅の丸サイズ＝停車本数**、
+**駅クリックで種別ごと・合計の停車本数**を表示する機能。急行/各停で停車駅が違う路線
+（西武池袋線・京王線など）で「1路線に1本数」の無理を避け、駅が各自の数字を持つ。
+
+- 線の太さ＝通過本数（`data/lines.csv` の `本数`。区間分割スキルの担当）
+- 駅サイズ＝停車本数（`stopTrains`）／クリックの種別内訳（`stopTypes`）＝**この節の担当**
+
+対象は区間分割（`data/lines.csv`）とは独立で、`data/lines.csv` は変更しない。
+
+### いつ使う（起動フレーズ）
+
+「停車本数を駅に表示」「種別ごとの停車本数」「駅サイズに反映」「この路線も急行/各停の差を出す」
+「◯◯線を駅サイズ対応に」などと言われたとき。**区間分割の依頼とは別物**（混同しない）。
+
+### 手順
+
+#### ステップ 1: 対象路線を `TARGET_LINES` に追加
+
+`train-counts/scrape-station-stops.cjs` 先頭の `TARGET_LINES` に `{ line, terminals }` を足す。
+
+- `line` — `public/data/stations.geojson` の路線名（駅一覧はここから自動取得）。
+- `terminals` — **上り（東京寄り終端）方面ラベルの優先順**の配列。各駅で、この方面へ向かう
+  向きの平日発車本数＝停車本数を数える。先頭が見つからなければ次を試す
+  （例: 西武池袋線は飯能以西の秩父線区間で上りラベルが「飯能」になるため `['池袋','飯能']`）。
+- 難所の駅だけ次の任意フィールドで上書き：
+  - `stationLine: { 駅名: 別路線名 }` — その駅で数える路線を差し替え（例: 初台・幡ヶ谷は
+    京王線に出ないので `京王新線`）。
+  - `stationToward: { 駅名: [向き先] }` — その駅だけ方面ラベルを上書き（例: 京王新線の上りは
+    都営新宿線直通で終点が本八幡になるので `['本八幡']`）。
+
+#### ステップ 2: 停車本数をスクレイプ
+
+```bash
+node train-counts/scrape-station-stops.cjs            # TARGET_LINES 全路線
+node train-counts/scrape-station-stops.cjs 京王線       # 路線名で絞り込み（部分一致）
+FRESH=1 node train-counts/scrape-station-stops.cjs ... # キャッシュ無視で再取得
+```
+
+- 出力は `train-counts/station-stops.json`（`{ 路線: { 駅名: { total, types } } }`）。
+- 種別名は `特急◯◯N号` の愛称・号数を落として `特急` に正規化（準特急・通勤特急は残す）。
+- **⚠ 路線名で絞ると JSON はその路線だけで上書きされる。** 既存路線ぶんを残すなら
+  **引数なし**で全 `TARGET_LINES` を回すこと（絞り込みは新規追加路線の動作確認用）。
+- `✗ … 未解決` が出たら理由（駅ID未解決／方向不定／路線なし）を見て、ステップ1の
+  `stationLine`/`stationToward`、または `scrape-yahoo-trains.cjs` の
+  `STATION_ID_OVERRIDES`（駅名→駅ID）を追加して再実行。
+
+#### ステップ 3: GeoJSON を再生成（地図反映に必須）
+
+```bash
+node scripts/build-railways.cjs
+```
+
+`build-railways.cjs` が `station-stops.json` を読み、駅フィーチャに `stopTrains`（合計・
+駅サイズ用）と `stopTypes`（種別内訳の JSON 文字列・ポップアップ用）を付与する
+（`stopTrainsFor()`。乗換駅で複数路線にデータがあれば合計の多い路線を採用）。
+`src/map/MapView.tsx` は `stopTrains` で `circle-radius` を連続変化させ、駅クリックで
+`stopTypes` を本数降順に表示する（データの無い駅は従来の `major` 2値サイズ・駅名のみ）。
+
+### 近似・注意
+
+- 直通サービス（西武→副都心線・京王→都営新宿線 等）は Yahoo 上で別路線扱いのため
+  停車本数に含まれない。急行/各停の停車パターン差を見るには十分な近似。
+- 数え方は片方向（上り）。線の太さ側（`本数`）と同じく平日・片方向で揃えている。
+- robots.txt 遵守・キャッシュ・駅ID解決は区間分割と共通の Yahoo スクレイパ基盤
+  （`train-counts/scrape-yahoo-trains.cjs` のヘルパー）を再利用している。
 
 ## robots.txt の遵守
 
