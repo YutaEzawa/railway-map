@@ -156,7 +156,11 @@ function normLine(s) {
   return String(s).normalize('NFKC').replace(/\s+/g, '').replace(/^JR(東日本|東海|西日本)?/i, '')
 }
 function normStation(s) {
-  return String(s).normalize('NFKC').replace(/\s+/g, '').replace(/[(（].*?[)）]/g, '')
+  return String(s)
+    .normalize('NFKC')
+    .replace(/\s+/g, '')
+    .replace(/[(（].*?[)）]/g, '')
+    .replace(/[ヶヵ]/g, 'ケ') // 表記ゆれ吸収: 茅ヶ崎/茅ケ崎 等
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
