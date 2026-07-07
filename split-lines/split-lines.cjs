@@ -142,6 +142,8 @@ const LINE_NAME_TO_YAHOO = {
   関西線: ['関西本線', '大和路線'], // 大阪口は大和路線
   福知山線: ['福知山線', 'JR宝塚線'], // 大阪口は JR宝塚線
   高野線: ['南海高野線', '汐見橋線'], // 汐見橋口は運行系統が別
+  箱根登山鉄道: '箱根登山線',
+  根室線: ['根室本線', '花咲線'], // 釧路〜根室は花咲線
   帆柱ケーブル線: '皿倉山ケーブルカー',
   立山黒部貫光鋼索線: ['黒部ケーブルカー', '立山ケーブルカー'],
   富山地方鉄道本線: ['富山地方鉄道本線', '富山地方鉄道'],
@@ -1012,6 +1014,10 @@ async function analyzeLine(lineName, trunk, branches, islands, stationIndex, for
     if (freqLast !== null) { nearLastIdx = i; break }
   }
   if (freqLast === null) {
+    if (n <= 3) {
+      // 2〜3駅の短小路線（ケーブルカー等）で終端駅が Yahoo に無い場合は始端の値で均一とみなす
+      return { status: 'uniform', freq: freqFirst }
+    }
     return { status: 'fail', reason: `終端付近「${endCands.map((i) => trunk[i].name).join('/')}」で本数取得失敗` }
   }
 
@@ -1171,8 +1177,8 @@ function writeReviewFile(allRows) {
   out.push('`split-lines` が自動処理した結果のうち、人手確認が必要なものの一覧。')
   out.push('このファイルは `data/lines.csv` から生成される（`node split-lines/split-lines.cjs --review` で再生成）。')
   out.push('')
-  out.push('- **auto_review** … 本数の中間V字凹みなど不自然な兆候あり。値は暫定で地図には反映済み。')
-  out.push('- **auto_fail** … 駅順序ずれ等で自動処理に失敗。本数は既定値のまま。')
+  out.push('- **auto_review** … 一部区間（支線・飛び地）の本数が取得できず既定値のまま。他区間は反映済み。')
+  out.push('- **auto_fail** … 自動処理に失敗（Yahoo!で路線を解決できない等）。本数は既定値のまま。')
   out.push('')
   out.push('確認して正しい区間・本数に直したら、その行の `状態` を `manual` にすると本リストから外れる。')
   out.push('')
