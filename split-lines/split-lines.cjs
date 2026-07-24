@@ -46,6 +46,47 @@ const KANA_ROWS = ['a', 'ka', 'sa', 'ta', 'na', 'ha', 'ma', 'ya', 'ra', 'wa']
 const RAILWAYS_PATH = path.resolve(__dirname, '../public/data/railways.geojson')
 const STATIONS_PATH = path.resolve(__dirname, '../public/data/stations.geojson')
 const REVIEW_PATH = path.resolve(__dirname, '../data/review.md')
+const STATION_STOPS_PATH = path.resolve(__dirname, '../train-counts/station-stops.json')
+
+/**
+ * 種別が「ほぼ全列車」とみなせるか判定する閾値。
+ * 代表本数（駅ごとの最大値）が路線内最大種別の RARE_TYPE_RATIO 未満なら、
+ * 特急・ライナー等の優等/少数便種別とみなして境界検証から除外する。
+ */
+const RARE_TYPE_RATIO = 0.25
+
+let stationStopsCache = null
+/** train-counts/station-stops.json（停車本数の種別内訳）を読む。無ければ {} */
+function loadStationStops() {
+  if (stationStopsCache) return stationStopsCache
+  try {
+    stationStopsCache = JSON.parse(fs.readFileSync(STATION_STOPS_PATH, 'utf8'))
+  } catch {
+    stationStopsCache = {}
+  }
+  return stationStopsCache
+}
+
+/**
+ * 路線の停車本数データ（{駅: {types}}）から「ほぼ全列車が停車する駅」集合を求める。
+ * 特急・ライナー等の少数便種別（路線内最大種別の RARE_TYPE_RATIO 未満）は無視し、
+ * 残った主要種別がすべて停車する駅を返す。
+ */
+function relaxedMajorStations(lineStops) {
+  const repCount = {}
+  for (const st of Object.values(lineStops)) {
+    for (const [type, count] of Object.entries(st.types)) {
+      repCount[type] = Math.max(repCount[type] ?? 0, count)
+    }
+  }
+  const maxCount = Math.max(0, ...Object.values(repCount))
+  const majorTypes = Object.keys(repCount).filter((t) => repCount[t] >= maxCount * RARE_TYPE_RATIO)
+  const result = new Set()
+  for (const [name, st] of Object.entries(lineStops)) {
+    if (majorTypes.every((t) => (st.types[t] ?? 0) > 0)) result.add(name)
+  }
+  return result
+}
 
 /**
  * CSV 路線名 → Yahoo! 表示名（異なる場合のみ）。部分一致で使用する。
@@ -1141,8 +1182,11 @@ function generateRows(lineName, result, originalRows) {
 
   if (result.status === 'split') {
     // 中間V字凹み（dipWarnings）は優等停車駅で測定済みの値なのでそのまま採用（auto_v2）。
-    // 支線などの本数取得失敗（probeWarnings）だけを auto_review（人手確認）に落とす。
-    const status = result.probeWarnings && result.probeWarnings.length ? 'auto_review' : 'auto_v2'
+    // 支線などの本数取得失敗（probeWarnings）・境界駅の停車パターン不一致（stopPatternWarnings）は
+    // auto_review（人手確認）に落とす。
+    const hasWarn = (result.probeWarnings && result.probeWarnings.length) ||
+      (result.stopPatternWarnings && result.stopPatternWarnings.length)
+    const status = hasWarn ? 'auto_review' : 'auto_v2'
     return result.sections.map((sec) => ({
       line: lineName,
       section: `${lineName}(${sec.startStation}〜${sec.endStation})`,
@@ -1177,7 +1221,9 @@ function writeReviewFile(allRows) {
   out.push('`split-lines` が自動処理した結果のうち、人手確認が必要なものの一覧。')
   out.push('このファイルは `data/lines.csv` から生成される（`node split-lines/split-lines.cjs --review` で再生成）。')
   out.push('')
-  out.push('- **auto_review** … 一部区間（支線・飛び地）の本数が取得できず既定値のまま。他区間は反映済み。')
+  out.push('- **auto_review** … 一部区間（支線・飛び地）の本数が取得できず既定値のまま、')
+  out.push('  または境界駅が「ほぼ全列車停車駅」でない（stop-pattern検証、station-stops.json のある路線のみ）。')
+  out.push('  値はいずれも暫定で反映済み。')
   out.push('- **auto_fail** … 自動処理に失敗（Yahoo!で路線を解決できない等）。本数は既定値のまま。')
   out.push('')
   out.push('確認して正しい区間・本数に直したら、その行の `状態` を `manual` にすると本リストから外れる。')
@@ -1201,7 +1247,7 @@ function writeReviewFile(allRows) {
           out.push(`| ${r.section || '(全体)'} | ${r.trains == null ? '-' : r.trains} |`)
         }
         out.push('')
-        out.push('→ 本数の並びが不自然（中間で減って増える等）。実態を確認し区間・本数を修正。')
+        out.push('→ 本数の並びが不自然、または境界駅が主要種別停車駅でない可能性。実態を確認し区間・本数を修正。')
       } else {
         out.push('')
         out.push('→ 自動処理失敗。`node split-lines/split-lines.cjs --line "' + line + '" --fresh` で理由を確認。')
@@ -1289,18 +1335,34 @@ async function main() {
     result.dipWarnings = result.status === 'split'
       ? findFreqDips(result.sections.filter((s) => !s.isBranch))
       : []
+    // 自己検証: 境界駅が「ほぼ全列車停車駅」か（train-counts/station-stops.json がある路線のみ）。
+    // 満たさない境界は駅順序ずれ・過小カウントの疑いがあるため auto_review に回す。
+    result.stopPatternWarnings = []
+    const lineStops = loadStationStops()[lineName]
+    if (lineStops && result.status === 'split') {
+      const relaxedSet = relaxedMajorStations(lineStops)
+      const trunkSections = result.sections.filter((s) => !s.isBranch)
+      for (let i = 0; i < trunkSections.length - 1; i++) {
+        const boundary = trunkSections[i].endStation
+        if (lineStops[boundary] && !relaxedSet.has(boundary)) {
+          result.stopPatternWarnings.push(`境界駅「${boundary}」は主要種別が全て停車する駅ではない`)
+        }
+      }
+    }
     const origRows = allRows.filter((r) => r.line === lineName)
     const newRows = generateRows(lineName, result, origRows)
 
     if (result.status === 'uniform') {
       console.log(`  ✓ 均一 ${result.freq}本 → auto_v1`)
     } else if (result.status === 'split') {
-      const tag = result.probeWarnings.length ? 'auto_review（要確認）' : 'auto_v2'
+      const hasWarn = result.probeWarnings.length || result.stopPatternWarnings.length
+      const tag = hasWarn ? 'auto_review（要確認）' : 'auto_v2'
       console.log(`  ✓ 区間分割 ${result.sections.length}区間 → ${tag}`)
       for (const sec of result.sections) {
         console.log(`    ${sec.isBranch ? '（支線）' : ''}${sec.startStation}〜${sec.endStation}: ${sec.freq ?? '?'}本 (${sec.stations.length}駅)`)
       }
       for (const w of result.probeWarnings) console.log(`    ⚠ 要確認: ${w}`)
+      for (const w of result.stopPatternWarnings) console.log(`    ⚠ 要確認（停車パターン検証）: ${w}`)
       for (const w of result.dipWarnings) console.log(`    ⚠ 中間極小（優等停車駅で測定済みのため採用）: ${w}`)
     } else {
       console.log(`  ✗ 失敗: ${result.reason}`)
@@ -1312,7 +1374,8 @@ async function main() {
   // 結果をサマリー表示
   console.log('\n=== サマリー ===')
   for (const { lineName, result } of results) {
-    const hasWarn = result.probeWarnings && result.probeWarnings.length
+    const hasWarn = (result.probeWarnings && result.probeWarnings.length) ||
+      (result.stopPatternWarnings && result.stopPatternWarnings.length)
     const mark = result.status === 'fail' ? '✗' : hasWarn ? '⚠' : '✓'
     const detail =
       result.status === 'uniform' ? `均一 ${result.freq}本` :
@@ -1321,12 +1384,15 @@ async function main() {
     console.log(`  ${mark} ${lineName}: ${detail}`)
   }
 
-  // 自己検証: 要確認（支線等の本数取得失敗）の路線を明示
-  const flagged = results.filter((r) => r.result.probeWarnings && r.result.probeWarnings.length)
+  // 自己検証: 要確認（支線等の本数取得失敗・境界駅の停車パターン不一致）の路線を明示
+  const flagged = results.filter((r) =>
+    (r.result.probeWarnings && r.result.probeWarnings.length) ||
+    (r.result.stopPatternWarnings && r.result.stopPatternWarnings.length))
   if (flagged.length) {
-    console.log('\n=== ⚠ 要確認（一部区間の本数が取得できず既定値）===')
+    console.log('\n=== ⚠ 要確認 ===')
     for (const { lineName, result } of flagged) {
       for (const w of result.probeWarnings) console.log(`  ${lineName}: ${w}`)
+      for (const w of result.stopPatternWarnings) console.log(`  ${lineName}: ${w}`)
     }
   }
 
