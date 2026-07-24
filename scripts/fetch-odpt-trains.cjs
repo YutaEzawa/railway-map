@@ -28,7 +28,7 @@ const WEEKDAY = 'odpt.Calendar:Weekday'
 
 /** 取得対象の事業者（id・APIホスト・使用するトークンの環境変数名）。 */
 const OPERATORS = [
-  { id: 'JR-East', host: 'https://api-challenge2024.odpt.org/api/v4', tokenEnv: 'ODPT_CHALLENGE_TOKEN' },
+  { id: 'JR-East', host: 'https://api-challenge.odpt.org/api/v4', tokenEnv: 'ODPT_CHALLENGE_TOKEN' },
   { id: 'TokyoMetro', host: 'https://api.odpt.org/api/v4', tokenEnv: 'ODPT_TOKEN' },
   { id: 'Toei', host: 'https://api.odpt.org/api/v4', tokenEnv: 'ODPT_TOKEN' },
   { id: 'MIR', host: 'https://api.odpt.org/api/v4', tokenEnv: 'ODPT_TOKEN' },
