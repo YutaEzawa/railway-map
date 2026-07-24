@@ -24,6 +24,7 @@
 const fs = require('fs')
 const path = require('path')
 const { readRows, writeRows } = require('../scripts/lines-csv.cjs')
+const { relaxedMajorStations: relaxedMajorStationsShared } = require('../train-counts/relaxed-major-stations.cjs')
 
 // ====== 定数 ======
 const BASE = 'https://transit.yahoo.co.jp'
@@ -48,13 +49,6 @@ const STATIONS_PATH = path.resolve(__dirname, '../public/data/stations.geojson')
 const REVIEW_PATH = path.resolve(__dirname, '../data/review.md')
 const STATION_STOPS_PATH = path.resolve(__dirname, '../train-counts/station-stops.json')
 
-/**
- * 種別が「ほぼ全列車」とみなせるか判定する閾値。
- * 代表本数（駅ごとの最大値）が路線内最大種別の RARE_TYPE_RATIO 未満なら、
- * 特急・ライナー等の優等/少数便種別とみなして境界検証から除外する。
- */
-const RARE_TYPE_RATIO = 0.25
-
 let stationStopsCache = null
 /** train-counts/station-stops.json（停車本数の種別内訳）を読む。無ければ {} */
 function loadStationStops() {
@@ -68,24 +62,15 @@ function loadStationStops() {
 }
 
 /**
- * 路線の停車本数データ（{駅: {types}}）から「ほぼ全列車が停車する駅」集合を求める。
- * 特急・ライナー等の少数便種別（路線内最大種別の RARE_TYPE_RATIO 未満）は無視し、
- * 残った主要種別がすべて停車する駅を返す。
+ * 路線の停車本数データ（{駅: {total,types}}）から「多くの列車が止まる駅」集合を求める。
+ * 実体は train-counts/relaxed-major-stations.cjs（Yahoo!スクレイプ／ODPT共通ロジック）。
+ * @param {string[]} trunkOrder 駅名（物理順）
+ * @param {Record<string, {total:number, types:Record<string,number>}>} lineStops
  */
-function relaxedMajorStations(lineStops) {
-  const repCount = {}
-  for (const st of Object.values(lineStops)) {
-    for (const [type, count] of Object.entries(st.types)) {
-      repCount[type] = Math.max(repCount[type] ?? 0, count)
-    }
-  }
-  const maxCount = Math.max(0, ...Object.values(repCount))
-  const majorTypes = Object.keys(repCount).filter((t) => repCount[t] >= maxCount * RARE_TYPE_RATIO)
-  const result = new Set()
-  for (const [name, st] of Object.entries(lineStops)) {
-    if (majorTypes.every((t) => (st.types[t] ?? 0) > 0)) result.add(name)
-  }
-  return result
+function relaxedMajorStations(trunkOrder, lineStops) {
+  const stopCounts = {}
+  for (const [name, st] of Object.entries(lineStops)) stopCounts[name] = st.types
+  return relaxedMajorStationsShared(trunkOrder, stopCounts).result
 }
 
 /**
@@ -1181,12 +1166,14 @@ function generateRows(lineName, result, originalRows) {
   }
 
   if (result.status === 'split') {
-    // 中間V字凹み（dipWarnings）は優等停車駅で測定済みの値なのでそのまま採用（auto_v2）。
+    // 中間V字凹み（dipWarnings）は優等停車駅で測定済みの値なのでそのまま採用。
     // 支線などの本数取得失敗（probeWarnings）・境界駅の停車パターン不一致（stopPatternWarnings）は
     // auto_review（人手確認）に落とす。
+    // stopPatternVerified（station-stops.json あり）かつ不一致なしなら、境界が「多くの列車が
+    // 止まる駅」であると確認できたことになるので auto_v3。確認できなければ auto_v2（未検証）。
     const hasWarn = (result.probeWarnings && result.probeWarnings.length) ||
       (result.stopPatternWarnings && result.stopPatternWarnings.length)
-    const status = hasWarn ? 'auto_review' : 'auto_v2'
+    const status = hasWarn ? 'auto_review' : result.stopPatternVerified ? 'auto_v3' : 'auto_v2'
     return result.sections.map((sec) => ({
       line: lineName,
       section: `${lineName}(${sec.startStation}〜${sec.endStation})`,
@@ -1335,17 +1322,20 @@ async function main() {
     result.dipWarnings = result.status === 'split'
       ? findFreqDips(result.sections.filter((s) => !s.isBranch))
       : []
-    // 自己検証: 境界駅が「ほぼ全列車停車駅」か（train-counts/station-stops.json がある路線のみ）。
+    // 自己検証: 境界駅が「多くの列車が止まる駅」か（train-counts/station-stops.json がある路線のみ）。
     // 満たさない境界は駅順序ずれ・過小カウントの疑いがあるため auto_review に回す。
+    // 満たしていれば（＝境界を多くの列車が止まる駅で選べたことが確認できたので）auto_v3 とする。
     result.stopPatternWarnings = []
+    result.stopPatternVerified = false
     const lineStops = loadStationStops()[lineName]
     if (lineStops && result.status === 'split') {
-      const relaxedSet = relaxedMajorStations(lineStops)
+      result.stopPatternVerified = true
+      const relaxedSet = relaxedMajorStations(trunk.map((s) => s.name), lineStops)
       const trunkSections = result.sections.filter((s) => !s.isBranch)
       for (let i = 0; i < trunkSections.length - 1; i++) {
         const boundary = trunkSections[i].endStation
         if (lineStops[boundary] && !relaxedSet.has(boundary)) {
-          result.stopPatternWarnings.push(`境界駅「${boundary}」は主要種別が全て停車する駅ではない`)
+          result.stopPatternWarnings.push(`境界駅「${boundary}」は多くの列車が止まる駅ではない`)
         }
       }
     }
@@ -1356,7 +1346,7 @@ async function main() {
       console.log(`  ✓ 均一 ${result.freq}本 → auto_v1`)
     } else if (result.status === 'split') {
       const hasWarn = result.probeWarnings.length || result.stopPatternWarnings.length
-      const tag = hasWarn ? 'auto_review（要確認）' : 'auto_v2'
+      const tag = hasWarn ? 'auto_review（要確認）' : result.stopPatternVerified ? 'auto_v3' : 'auto_v2'
       console.log(`  ✓ 区間分割 ${result.sections.length}区間 → ${tag}`)
       for (const sec of result.sections) {
         console.log(`    ${sec.isBranch ? '（支線）' : ''}${sec.startStation}〜${sec.endStation}: ${sec.freq ?? '?'}本 (${sec.stations.length}駅)`)
